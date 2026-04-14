@@ -24,6 +24,10 @@ function gasUrlWithQuery(base, params) {
   return u.toString()
 }
 
+function actionUrl(action, extra = {}) {
+  return gasUrlWithQuery(BASE_URL, { action, ...extra })
+}
+
 const OFFLINE_KEYS = {
   cardsList: 'tk_offline_cards_list_v1',
   cardsAll: 'tk_offline_cards_all_v1',
@@ -168,12 +172,17 @@ export async function fetchAllCards(options = {}) {
   if (!BASE_URL) {
     return mockCards
   }
+  const forceNetwork = Boolean(options.forceNetwork)
   try {
-    const data = await requestJson(`${BASE_URL}?action=getAll`, { signal: options.signal })
+    const data = await requestJson(
+      actionUrl('getAll', forceNetwork ? { _cb: Date.now() } : {}),
+      { signal: options.signal },
+    )
     const cards = data.cards || []
     writeOffline(OFFLINE_KEYS.cardsAll, cards)
     return cards
   } catch (err) {
+    if (forceNetwork) throw err
     const cached = readOffline(OFFLINE_KEYS.cardsAll, [])
     if (cached.length) return cached
     throw err
@@ -184,12 +193,17 @@ export async function fetchCardList(options = {}) {
   if (!BASE_URL) {
     return mockCards
   }
+  const forceNetwork = Boolean(options.forceNetwork)
   try {
-    const data = await requestJson(`${BASE_URL}?action=getList`, { signal: options.signal })
+    const data = await requestJson(
+      actionUrl('getList', forceNetwork ? { _cb: Date.now() } : {}),
+      { signal: options.signal },
+    )
     const cards = data.cards || []
     writeOffline(OFFLINE_KEYS.cardsList, cards)
     return cards
   } catch (err) {
+    if (forceNetwork) throw err
     const cachedList = readOffline(OFFLINE_KEYS.cardsList, [])
     if (cachedList.length) return cachedList
     throw err

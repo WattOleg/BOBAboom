@@ -24,7 +24,8 @@ export function useCards() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const loadCards = useCallback(async () => {
+  const loadCards = useCallback(async (opts = {}) => {
+    const forceNetwork = Boolean(opts.forceNetwork)
     try {
       setLoading(true)
       setError('')
@@ -33,7 +34,7 @@ export function useCards() {
 
       let nextCards = []
       try {
-        nextCards = await fetchCardList({ signal: controller.signal })
+        nextCards = await fetchCardList({ signal: controller.signal, forceNetwork })
       } finally {
         clearTimeout(timer)
       }
@@ -44,7 +45,7 @@ export function useCards() {
       // Does not block rendering the list.
       void (async () => {
         try {
-          const full = await fetchAllCards()
+          const full = await fetchAllCards({ forceNetwork })
           if (!Array.isArray(full) || full.length === 0) return
           const byId = new Map(full.map((c) => [c.sheetName, c]))
           setCards((prev) => prev.map((c) => byId.get(c.sheetName) || c))
@@ -91,7 +92,7 @@ export function useCards() {
     cards: sortedCards,
     loading,
     error,
-    refresh: loadCards,
+    refresh: useCallback(() => loadCards({ forceNetwork: true }), [loadCards]),
     addLocalCard,
     updateLocalCard,
     removeLocalCard,

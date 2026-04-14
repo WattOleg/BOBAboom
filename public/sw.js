@@ -1,5 +1,5 @@
-const STATIC_CACHE = 'tk-static-v3'
-const RUNTIME_CACHE = 'tk-runtime-v3'
+const STATIC_CACHE = 'tk-static-v4'
+const RUNTIME_CACHE = 'tk-runtime-v4'
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/e-Bar.png']
 
 self.addEventListener('install', (event) => {
@@ -60,6 +60,12 @@ self.addEventListener('fetch', (event) => {
           return cached || Response.error()
         }),
     )
+    return
+  }
+
+  // API on same-origin should be network-only (fresh data, no stale cache).
+  if (url.origin === self.location.origin && url.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(request, { cache: 'no-store' }).catch(() => Response.error()))
     return
   }
 
