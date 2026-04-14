@@ -9,13 +9,15 @@
  */
 export function getGasClientBaseUrl() {
   const raw = String(import.meta.env.VITE_APPS_SCRIPT_URL || '').trim()
-  if (!raw) return ''
-  if (raw.startsWith('/') && !raw.startsWith('//')) return raw
-
-  if (typeof window === 'undefined') return raw
+  if (typeof window === 'undefined') return raw || ''
 
   const host = window.location.hostname
   const localHost = host === 'localhost' || host === '127.0.0.1'
+  if (!raw) {
+    // На проде по умолчанию используем serverless-прокси, даже если забыли VITE_APPS_SCRIPT_URL.
+    return import.meta.env.DEV || localHost ? '' : '/api/gas'
+  }
+  if (raw.startsWith('/') && !raw.startsWith('//')) return raw
   if (import.meta.env.DEV || localHost) return raw
 
   if (/^https:\/\/script\.google\.com\//i.test(raw)) return '/api/gas'
