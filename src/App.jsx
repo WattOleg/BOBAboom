@@ -11,7 +11,9 @@ import {
   fetchSchedule,
   fetchSectionsContent,
   fetchWriteoffs,
+  fetchStopList,
   mutateWriteoffs,
+  mutateStopList,
   syncWriteoffsOfflineCache,
   updateCard,
   updateSchedule,
@@ -141,6 +143,7 @@ const DEFAULT_SECTION_CONTENT = {
 
 const VISIT_EVENT = 'app-visit-count'
 const DEFAULT_WRITEOFFS = { entries: [], templates: [] }
+const DEFAULT_STOP_LIST = []
 
 function App() {
   const { cards, loading, error, refresh, addLocalCard, updateLocalCard, removeLocalCard } = useCards()
@@ -168,6 +171,10 @@ function App() {
   const [writeoffsLoading, setWriteoffsLoading] = useState(false)
   const [writeoffsSaving, setWriteoffsSaving] = useState(false)
   const [writeoffsSaveError, setWriteoffsSaveError] = useState('')
+  const [stopListData, setStopListData] = useState(DEFAULT_STOP_LIST)
+  const [stopListLoading, setStopListLoading] = useState(false)
+  const [stopListSaving, setStopListSaving] = useState(false)
+  const [stopListError, setStopListError] = useState('')
 
   const selectedCard = useMemo(
     () => cards.find((card) => card.sheetName === selectedId) || null,
@@ -194,6 +201,26 @@ function App() {
         setSectionContent({ ...DEFAULT_SECTION_CONTENT, ...sharedSections })
       } catch {
         // Keep local defaults when server sections are not available.
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      try {
+        setStopListLoading(true)
+        setStopListError('')
+        const data = await fetchStopList()
+        if (!active) return
+        setStopListData(Array.isArray(data) ? data : [])
+      } catch (err) {
+        if (active) setStopListError(err.message || 'Не удалось загрузить стоп-лист')
+      } finally {
+        if (active) setStopListLoading(false)
       }
     })()
     return () => {
@@ -511,6 +538,25 @@ function App() {
     }
   }
 
+  const reloadStopList = async () => {
+    const fresh = await fetchStopList()
+    setStopListData(Array.isArray(fresh) ? fresh : [])
+  }
+
+  const runStopListMutation = async (payload) => {
+    setStopListSaving(true)
+    setStopListError('')
+    try {
+      await mutateStopList(payload)
+      await reloadStopList()
+    } catch (err) {
+      setStopListError(err.message || 'Ошибка сохранения стоп-листа')
+      throw err
+    } finally {
+      setStopListSaving(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <div className={`screen-stack view-${view}`}>
@@ -530,6 +576,25 @@ function App() {
             onRefresh={refresh}
             onExportSelected={exportSelectedCards}
             onCreate={() => requestAction('create')}
+            stopList={{
+              data: stopListData,
+              loading: stopListLoading,
+              saving: stopListSaving,
+              error: stopListError,
+              onReload: async () => {
+                try {
+                  setStopListLoading(true)
+                  setStopListError('')
+                  await reloadStopList()
+                } catch (err) {
+                  setStopListError(err.message || 'Не удалось обновить стоп-лист')
+                } finally {
+                  setStopListLoading(false)
+                }
+              },
+              onAdd: (entry) => runStopListMutation({ op: 'append', entry }),
+              onDelete: (id) => runStopListMutation({ op: 'delete', id }),
+            }}
             schedule={
               activeSection === 'schedule'
                 ? {

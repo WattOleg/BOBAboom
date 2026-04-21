@@ -22,6 +22,7 @@ function ListView({
   onRefresh,
   onExportSelected,
   onCreate,
+  stopList,
   schedule,
   writeoffs,
 }) {
@@ -33,6 +34,9 @@ function ListView({
   const [selectedIds, setSelectedIds] = useState([])
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState('')
+  const [stopListOpen, setStopListOpen] = useState(false)
+  const [stopItemName, setStopItemName] = useState('')
+  const [stopItemDate, setStopItemDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [showScrollTop, setShowScrollTop] = useState(false)
 
   useEffect(() => {
@@ -149,6 +153,17 @@ function ListView({
     }
   }
 
+  const submitStopListItem = async () => {
+    const item = stopItemName.trim()
+    if (!item || !stopList?.onAdd) return
+    await stopList.onAdd({
+      id: `tmp_${Date.now()}`,
+      item,
+      date: stopItemDate || new Date().toISOString().slice(0, 10),
+    })
+    setStopItemName('')
+  }
+
   const activeSectionLabel = sections.find((item) => item.id === activeSection)?.label || 'ТехКарты'
   const activeMainSection =
     activeSection === 'techcards' || activeSection === 'schedule' || activeSection === 'writeoffs'
@@ -246,14 +261,35 @@ function ListView({
       ) : activeSection === 'schedule' || activeSection === 'writeoffs' ? null : (
         <>
           <div className="toolbar-row">
-            <button type="button" className="refresh-btn" onClick={onCreate}>
-              Создать
+            <button
+              type="button"
+              className="refresh-btn toolbar-icon-btn"
+              onClick={onCreate}
+              aria-label="Создать"
+              title="Создать"
+            >
+              <span aria-hidden>➕</span>
             </button>
-            <button type="button" className="refresh-btn" onClick={onRefresh}>
-              Обновить
+            <button
+              type="button"
+              className="refresh-btn toolbar-icon-btn"
+              onClick={onRefresh}
+              aria-label="Обновить"
+              title="Обновить"
+            >
+              <span aria-hidden>🔄</span>
             </button>
-            <button type="button" className="refresh-btn" onClick={openExportModal}>
-              Экспорт PDF
+            <button
+              type="button"
+              className="refresh-btn toolbar-icon-btn"
+              onClick={openExportModal}
+              aria-label="Скачать PDF"
+              title="Скачать PDF"
+            >
+              <span aria-hidden>📄</span>
+            </button>
+            <button type="button" className="refresh-btn stop-list-btn" onClick={() => setStopListOpen(true)}>
+              Стоп лист
             </button>
           </div>
 
@@ -346,6 +382,62 @@ function ListView({
                   </button>
                 </div>
                 {exportError ? <p className="error">{exportError}</p> : null}
+              </div>
+            </div>
+          ) : null}
+
+          {stopListOpen ? (
+            <div className="export-modal-backdrop" onClick={() => setStopListOpen(false)}>
+              <div className="export-modal stop-list-modal" onClick={(e) => e.stopPropagation()}>
+                <h3>Стоп лист напитков</h3>
+                <div className="stop-list-form">
+                  <input
+                    type="text"
+                    value={stopItemName}
+                    onChange={(e) => setStopItemName(e.target.value)}
+                    placeholder="Например: Матча манго"
+                  />
+                  <input type="date" value={stopItemDate} onChange={(e) => setStopItemDate(e.target.value)} />
+                  <button
+                    type="button"
+                    className="btn btn-dark btn-compact"
+                    onClick={submitStopListItem}
+                    disabled={!stopItemName.trim() || stopList?.saving}
+                  >
+                    Добавить
+                  </button>
+                </div>
+                <div className="export-actions">
+                  <span className="muted">Позиции: {Array.isArray(stopList?.data) ? stopList.data.length : 0}</span>
+                  <button type="button" className="ghost-btn" onClick={stopList?.onReload} disabled={stopList?.loading}>
+                    Обновить
+                  </button>
+                </div>
+                <div className="export-list">
+                  {(stopList?.data || []).map((entry) => (
+                    <div key={entry.id} className="stop-list-row">
+                      <div>
+                        <strong>{entry.item}</strong>
+                        <div className="muted small">Дата: {entry.date || '-'}</div>
+                      </div>
+                      <button
+                        type="button"
+                        className="ghost-btn btn-compact"
+                        onClick={() => stopList?.onDelete?.(entry.id)}
+                        disabled={stopList?.saving}
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                  {!stopList?.loading && (!stopList?.data || stopList.data.length === 0) ? (
+                    <p className="muted small">Сейчас все позиции в наличии.</p>
+                  ) : null}
+                </div>
+                {stopList?.error ? <p className="error">{stopList.error}</p> : null}
+                <button type="button" className="ghost-btn" onClick={() => setStopListOpen(false)}>
+                  Закрыть
+                </button>
               </div>
             </div>
           ) : null}

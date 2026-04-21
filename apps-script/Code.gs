@@ -7,6 +7,7 @@ const SCHEDULE_SHEET_NAME = '_SCHEDULE'
 /** Месячные листы: _SCHEDULE_2026-03 (JSON смен + недостача за месяц) */
 const SCHEDULE_MONTH_PREFIX = '_SCHEDULE_'
 const STATS_SHEET_NAME = '_APP_STATS'
+const STOP_LIST_SHEET_NAME = '_STOP_LIST'
 /** Лента списаний: A–H — позиция, кол-во, ед., тип, сотрудник, дата, причина, UUID. Сначала ищем «старые» имена без лишнего _. */
 var WRITE_LOG_SHEET_NAMES = ['_WRITE_LOG', '_WRITE_LOG_']
 var WRITE_TPL_SHEET_NAMES = ['_WRITE_TPL', '_WRITE_TPL_']
@@ -19,9 +20,12 @@ function doGet(e) {
   if (action === 'getSections') return getSections()
   if (action === 'getSchedule') return getSchedule()
   if (action === 'getWriteoffs') return getWriteoffs()
+  if (action === 'getStopList') return getStopList()
   if (action === 'appendSimpleWriteoff') return appendSimpleWriteoff_(e.parameter)
   if (action === 'deleteSimpleWriteoff') return deleteSimpleWriteoff_(e.parameter)
   if (action === 'updateSimpleWriteoff') return updateSimpleWriteoff_(e.parameter)
+  if (action === 'appendStopListItem') return appendStopListItem_(e.parameter)
+  if (action === 'deleteStopListItem') return deleteStopListItem_(e.parameter)
   if (action === 'logVisit') return logAppVisit()
   return jsonResponse({ error: 'unknown action' })
 }
@@ -42,7 +46,84 @@ function doPost(e) {
   if (body.action === 'updateSchedule') return updateSchedule(body)
   if (body.action === 'updateWriteoffs') return updateWriteoffs(body)
   if (body.action === 'appendSimpleWriteoffPost') return appendSimpleWriteoffPost_(body)
+  if (body.action === 'appendStopListItem') return appendStopListItem_(body)
+  if (body.action === 'deleteStopListItem') return deleteStopListItem_(body)
   return jsonResponse({ error: 'unknown action' })
+}
+
+function getStopListSheet_(ss) {
+  let sh = ss.getSheetByName(STOP_LIST_SHEET_NAME)
+  if (!sh) {
+    sh = ss.insertSheet(STOP_LIST_SHEET_NAME)
+    sh.getRange(1, 1, 1, 3).setValues([['item', 'date', 'id']])
+    sh.hideSheet()
+  }
+  return sh
+}
+
+function normalizeStopDate_(value) {
+  const ymd = normalizeWriteoffDateYmd_(value)
+  if (ymd) return ymd
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')
+}
+
+function readStopList_(sheet) {
+  const last = sheet.getLastRow()
+  if (last < 2) return []
+  const data = sheet.getRange(2, 1, last - 1, 3).getValues()
+  const out = []
+  for (var i = 0; i < data.length; i++) {
+    const row = data[i]
+    const item = String(row[0] || '').trim()
+    if (!item) continue
+    const date = normalizeStopDate_(row[1])
+    const id = String(row[2] || '').trim() || Utilities.getUuid()
+    out.push({ id: id, item: item, date: date })
+  }
+  out.sort(function (a, b) {
+    return String(b.date || '').localeCompare(String(a.date || ''))
+  })
+  return out
+}
+
+function getStopList() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID)
+  const sh = getStopListSheet_(ss)
+  return jsonResponse({ stopList: readStopList_(sh) })
+}
+
+function appendStopListItem_(params) {
+  try {
+    const item = String(params.item || '').trim()
+    const date = normalizeStopDate_(params.date)
+    if (!item) return jsonResponse({ error: 'item required' })
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID)
+    const sh = getStopListSheet_(ss)
+    const id = Utilities.getUuid()
+    const nextRow = sh.getLastRow() + 1
+    sh.getRange(nextRow, 1, 1, 3).setValues([[item, date, id]])
+    return jsonResponse({ success: true, entry: { id: id, item: item, date: date } })
+  } catch (err) {
+    const msg = err && err.message ? String(err.message) : String(err)
+    return jsonResponse({ error: 'таблица: ' + msg })
+  }
+}
+
+function deleteStopListItem_(params) {
+  const id = String(params.id || '').trim()
+  if (!id) return jsonResponse({ error: 'id required' })
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID)
+  const sh = getStopListSheet_(ss)
+  const last = sh.getLastRow()
+  if (last < 2) return jsonResponse({ error: 'запись не найдена' })
+  const ids = sh.getRange(2, 3, last - 1, 1).getValues()
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0] || '').trim() === id) {
+      sh.deleteRow(i + 2)
+      return jsonResponse({ success: true })
+    }
+  }
+  return jsonResponse({ error: 'запись не найдена' })
 }
 
 function appendSimpleWriteoffPost_(body) {
@@ -466,6 +547,7 @@ function shouldIncludeSheetInCardList_(sheetName) {
     n === SECTIONS_SHEET_NAME ||
     n === SCHEDULE_SHEET_NAME ||
     n === STATS_SHEET_NAME ||
+    n === STOP_LIST_SHEET_NAME ||
     n === '_WRITEOFFS' ||
     n === '_WRITE_LOG' ||
     n === '_WRITE_TPL' ||

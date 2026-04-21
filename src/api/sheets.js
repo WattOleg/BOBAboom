@@ -34,6 +34,7 @@ const OFFLINE_KEYS = {
   sections: 'tk_offline_sections_v1',
   schedule: 'tk_offline_schedule_v1',
   writeoffs: 'tk_offline_writeoffs_v1',
+  stopList: 'tk_offline_stoplist_v1',
 }
 
 function readOffline(key, fallback) {
@@ -550,6 +551,80 @@ export async function mutateWriteoffs(payload, pin) {
         entry: payload.entry,
       }),
     })
+  }
+
+  throw new Error('Неверная операция')
+}
+
+function offlineStopListState() {
+  const cur = readOffline(OFFLINE_KEYS.stopList, null)
+  if (Array.isArray(cur)) return [...cur]
+  return []
+}
+
+function persistOfflineStopList(state) {
+  writeOffline(OFFLINE_KEYS.stopList, state)
+}
+
+export async function fetchStopList() {
+  if (!BASE_URL) {
+    return offlineStopListState()
+  }
+  try {
+    const cb = Date.now()
+    const data = await requestJson(`${BASE_URL}?action=getStopList&_cb=${cb}`)
+    const stopList = Array.isArray(data?.stopList) ? data.stopList : []
+    writeOffline(OFFLINE_KEYS.stopList, stopList)
+    return stopList
+  } catch (err) {
+    const cached = readOffline(OFFLINE_KEYS.stopList, null)
+    if (Array.isArray(cached)) return cached
+    throw err
+  }
+}
+
+export async function mutateStopList(payload) {
+  const op = String(payload?.op || '').trim()
+  if (!op) throw new Error('Не указана операция')
+
+  if (!BASE_URL) {
+    const state = offlineStopListState()
+    if (op === 'append' && payload.entry) {
+      const next = [{ ...payload.entry }, ...state.filter((x) => x.id !== payload.entry.id)]
+      persistOfflineStopList(next)
+      return { success: true, mocked: true }
+    }
+    if (op === 'delete' && payload.id) {
+      const next = state.filter((x) => x.id !== payload.id)
+      persistOfflineStopList(next)
+      return { success: true, mocked: true }
+    }
+    throw new Error('Неверная операция')
+  }
+
+  if (op === 'append' && payload.entry) {
+    const e = payload.entry
+    const fields = {
+      action: 'appendStopListItem',
+      item: String(e.item || '').trim(),
+      date: String(e.date || '').slice(0, 10),
+      _cb: String(Date.now()),
+    }
+    const getUrl = gasUrlWithQuery(BASE_URL, fields)
+    if (getUrl.length <= 7200) return await requestJson(getUrl)
+    return await requestJson(String(BASE_URL).trim(), {
+      method: 'POST',
+      body: JSON.stringify(fields),
+    })
+  }
+
+  if (op === 'delete' && payload.id) {
+    const url = gasUrlWithQuery(BASE_URL, {
+      action: 'deleteStopListItem',
+      id: String(payload.id),
+      _cb: String(Date.now()),
+    })
+    return await requestJson(url)
   }
 
   throw new Error('Неверная операция')
