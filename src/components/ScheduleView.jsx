@@ -44,24 +44,13 @@ function tenge(n) {
 
 const PAYROLL_SESSION_KEY = 'tk_payroll_unlocked_v1'
 
-function readPayrollSession(monthKey) {
+function clearPayrollSession(monthKey) {
   try {
     const raw = sessionStorage.getItem(PAYROLL_SESSION_KEY)
-    if (!raw) return {}
+    if (!raw) return
     const all = JSON.parse(raw)
-    return all && typeof all === 'object' && all[monthKey] && typeof all[monthKey] === 'object'
-      ? all[monthKey]
-      : {}
-  } catch {
-    return {}
-  }
-}
-
-function writePayrollSession(monthKey, monthData) {
-  try {
-    const raw = sessionStorage.getItem(PAYROLL_SESSION_KEY)
-    const all = raw ? JSON.parse(raw) : {}
-    all[monthKey] = monthData
+    if (!all || typeof all !== 'object') return
+    delete all[monthKey]
     sessionStorage.setItem(PAYROLL_SESSION_KEY, JSON.stringify(all))
   } catch {
     // ignore storage errors
@@ -169,9 +158,22 @@ function ScheduleView({
   const dates = useMemo(() => monthDateStrings(year, month), [year, month])
   const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`
 
-  useEffect(() => {
-    setPayrollUnlocked(readPayrollSession(monthKey))
+  const resetPayrollAccess = useCallback(() => {
+    setPayrollUnlocked({})
+    setPayrollEmployeeFilter('')
+    setPayrollPinModal({ open: false, employeeId: '', employeeName: '' })
+    clearPayrollSession(monthKey)
   }, [monthKey])
+
+  useEffect(() => {
+    resetPayrollAccess()
+  }, [monthKey, resetPayrollAccess])
+
+  useEffect(() => {
+    if (scheduleTab !== 'payroll') {
+      resetPayrollAccess()
+    }
+  }, [scheduleTab, resetPayrollAccess])
   const monthEmployees = useMemo(() => {
     const byMonth = data.employeesByMonth || {}
     const list = byMonth[monthKey]
@@ -297,9 +299,7 @@ function ScheduleView({
     try {
       const res = await verifyPayrollPin({ employeeId, pin, monthKey })
       if (!res?.success || !res.payout) return false
-      const next = { ...payrollUnlocked, [employeeId]: res.payout }
-      setPayrollUnlocked(next)
-      writePayrollSession(monthKey, next)
+      setPayrollUnlocked((prev) => ({ ...prev, [employeeId]: res.payout }))
       closePayrollPinModal()
       return true
     } finally {
@@ -312,6 +312,13 @@ function ScheduleView({
     if (employeeId && !canEdit && !payrollUnlocked[employeeId]) {
       openPayrollPinModal(employeeId)
     }
+  }
+
+  const switchScheduleTab = (tab) => {
+    if (tab !== 'payroll' && scheduleTab === 'payroll') {
+      resetPayrollAccess()
+    }
+    setScheduleTab(tab)
   }
 
   const getPayrollDisplayRow = (employeeId) => {
@@ -760,14 +767,14 @@ function ScheduleView({
         <button
           type="button"
           className={`chip ${scheduleTab === 'calendar' ? 'chip-active' : ''}`}
-          onClick={() => setScheduleTab('calendar')}
+          onClick={() => switchScheduleTab('calendar')}
         >
           Календарь
         </button>
         <button
           type="button"
           className={`chip ${scheduleTab === 'payroll' ? 'chip-active' : ''}`}
-          onClick={() => setScheduleTab('payroll')}
+          onClick={() => switchScheduleTab('payroll')}
         >
           К выплате
         </button>
@@ -816,6 +823,7 @@ function ScheduleView({
                   disabled={!canEdit}
                   placeholder="Имя"
                 />
+                {canEdit ? (
                 <label className="schedule-rate">
                   ₸/час
                   <input
@@ -824,9 +832,9 @@ function ScheduleView({
                     step={10}
                     value={e.hourlyRate}
                     onChange={(ev) => updateEmployee(e.id, { hourlyRate: Number(ev.target.value) || 0 })}
-                    disabled={!canEdit}
                   />
                 </label>
+                ) : null}
                 {canEdit ? (
                   <label className="schedule-rate schedule-payroll-pin">
                     PIN выплат
@@ -1120,9 +1128,9 @@ function ScheduleView({
                 >
                   <span className="schedule-total-dot" style={{ background: e.color }} />
                   <span className="schedule-total-name">
-                    {e.name}
+                    <span className="schedule-total-name-text">{e.name}</span>
                     {!canEdit && row.hourlyRate != null ? (
-                      <span className="schedule-payroll-rate muted small">{row.hourlyRate} ₸/час</span>
+                      <span className="schedule-payroll-rate">{row.hourlyRate} ₸/ч</span>
                     ) : null}
                   </span>
                   <strong className="schedule-total-col-num">{row.hours} ч</strong>

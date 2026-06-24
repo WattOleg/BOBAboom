@@ -5,6 +5,7 @@ function PayrollPinModal({ isOpen, title, subtitle, onVerify, onClose, verifying
   const [shake, setShake] = useState(false)
   const [error, setError] = useState('')
   const verifyRef = useRef(onVerify)
+  const attemptRef = useRef('')
 
   verifyRef.current = onVerify
 
@@ -13,37 +14,44 @@ function PayrollPinModal({ isOpen, title, subtitle, onVerify, onClose, verifying
       setDigits('')
       setShake(false)
       setError('')
+      attemptRef.current = ''
     }
   }, [isOpen])
 
   useEffect(() => {
     if (!isOpen || digits.length !== 4 || verifying) return
+    const attempt = digits
+    if (attemptRef.current === attempt) return
+    attemptRef.current = attempt
+
     let cancelled = false
     ;(async () => {
       try {
-        const ok = await verifyRef.current(digits)
+        const ok = await verifyRef.current(attempt)
         if (cancelled) return
         if (ok) {
           setDigits('')
           setError('')
+          attemptRef.current = ''
           return
         }
+        setDigits('')
+        attemptRef.current = ''
         setShake(true)
         setError('Неверный PIN')
         if (navigator.vibrate) navigator.vibrate(200)
         setTimeout(() => {
           setShake(false)
-          setDigits('')
         }, 350)
       } catch (err) {
         if (cancelled) return
+        setDigits('')
+        attemptRef.current = ''
         setShake(true)
         setError(err?.message || 'Не удалось проверить PIN')
         if (navigator.vibrate) navigator.vibrate(200)
         setTimeout(() => {
           setShake(false)
-          setDigits('')
-          setError('')
         }, 350)
       }
     })()
@@ -56,6 +64,7 @@ function PayrollPinModal({ isOpen, title, subtitle, onVerify, onClose, verifying
 
   const handleTap = (val) => {
     if (verifying) return
+    if (error) setError('')
     if (val === 'back') {
       setDigits((prev) => prev.slice(0, -1))
       return

@@ -1778,10 +1778,11 @@ h1 {
 .schedule-total-row {
   display: grid;
   /* Одинаковая сетка в каждой строке — числа в колонках совпадают по ширине */
-  grid-template-columns: 12px minmax(0, 1fr) 3.75rem 6.25rem 6.25rem;
-  column-gap: 12px;
-  align-items: center;
+  grid-template-columns: 12px minmax(0, 1fr) 3.25rem 5.5rem 5.5rem;
+  column-gap: 10px;
+  align-items: start;
   font-size: 13px;
+  line-height: 1.25;
 }
 
 .schedule-totals-head {
@@ -1792,6 +1793,7 @@ h1 {
   padding-bottom: 6px;
   border-bottom: 1px solid #eceae5;
   margin-bottom: 2px;
+  align-items: end;
 }
 
 .schedule-total-dot-spacer {
@@ -1800,8 +1802,18 @@ h1 {
 
 .schedule-total-name {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 1px;
+}
+
+.schedule-total-name-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
 }
 
 .schedule-total-col-num {
@@ -1809,6 +1821,7 @@ h1 {
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
   white-space: nowrap;
+  padding-top: 1px;
 }
 
 .schedule-total-net {
@@ -1819,6 +1832,7 @@ h1 {
   width: 10px;
   height: 10px;
   border-radius: 999px;
+  margin-top: 4px;
 }
 
 .schedule-grand {
@@ -1940,7 +1954,12 @@ h1 {
 
 .schedule-payroll-rate {
   display: block;
-  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text2);
+  white-space: nowrap;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .schedule-payroll-pin input {
