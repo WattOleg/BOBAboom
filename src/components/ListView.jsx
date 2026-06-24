@@ -400,17 +400,17 @@ function ListView({
                   <input type="date" value={stopItemDate} onChange={(e) => setStopItemDate(e.target.value)} />
                   <button
                     type="button"
-                    className="btn btn-dark btn-compact"
+                    className="btn btn-dark btn-compact stop-list-add-btn"
                     onClick={submitStopListItem}
                     disabled={!stopItemName.trim() || stopList?.saving}
                   >
-                    Добавить
+                    {stopList?.saving ? <span className="schedule-loading-spinner" aria-hidden /> : 'Добавить'}
                   </button>
                 </div>
                 <div className="export-actions">
                   <span className="muted">Позиции: {Array.isArray(stopList?.data) ? stopList.data.length : 0}</span>
-                  <button type="button" className="ghost-btn" onClick={stopList?.onReload} disabled={stopList?.loading}>
-                    Обновить
+                  <button type="button" className="ghost-btn stop-list-reload-btn" onClick={stopList?.onReload} disabled={stopList?.loading}>
+                    {stopList?.loading ? <span className="schedule-loading-spinner" aria-hidden /> : 'Обновить'}
                   </button>
                 </div>
                 <div className="export-list">
@@ -422,11 +422,11 @@ function ListView({
                       </div>
                       <button
                         type="button"
-                        className="ghost-btn btn-compact"
+                        className="ghost-btn btn-compact stop-list-delete-btn"
                         onClick={() => stopList?.onDelete?.(entry.id)}
                         disabled={stopList?.saving}
                       >
-                        Удалить
+                        {stopList?.saving ? <span className="schedule-loading-spinner" aria-hidden /> : 'Удалить'}
                       </button>
                     </div>
                   ))}

@@ -44,6 +44,7 @@ function doPost(e) {
   if (body.action === 'delete') return deleteSheet(body)
   if (body.action === 'updateSection') return updateSection(body)
   if (body.action === 'updateSchedule') return updateSchedule(body)
+  if (body.action === 'verifyPayrollPin') return verifyPayrollPin(body)
   if (body.action === 'updateWriteoffs') return updateWriteoffs(body)
   if (body.action === 'appendSimpleWriteoffPost') return appendSimpleWriteoffPost_(body)
   if (body.action === 'appendStopListItem') return appendStopListItem_(body)
@@ -889,6 +890,234 @@ function readMonthSheetPayload_(sheet) {
   }
 }
 
+function mergeEmployeePayrollPin_(incoming, existing) {
+  if (incoming && incoming.payrollPin != null) {
+    var np = String(incoming.payrollPin || '').trim()
+    if (np.length === 4) return np
+  }
+  var old = existing && existing.payrollPin ? String(existing.payrollPin).trim() : ''
+  return old.length === 4 ? old : ''
+}
+
+function sanitizeEmployeeForClient_(e) {
+  var pin = e && e.payrollPin != null ? String(e.payrollPin).trim() : ''
+  return {
+    id: String((e && e.id) || '').trim(),
+    name: String((e && e.name) || '').trim() || 'Без имени',
+    color: String((e && e.color) || '#f0d4cf').trim(),
+    hourlyRate: e && Number(e.hourlyRate) >= 0 ? Number(e.hourlyRate) : 0,
+    rateHistory: Array.isArray(e && e.rateHistory) ? e.rateHistory : [],
+    hasPayrollPin: pin.length === 4,
+  }
+}
+
+function scheduleTimeToMinutes_(t) {
+  if (!t) return 0
+  var parts = String(t).split(':')
+  var h = parseInt(parts[0], 10)
+  var m = parts.length > 1 ? parseInt(parts[1], 10) : 0
+  if (isNaN(h)) return 0
+  if (isNaN(m)) m = 0
+  return h * 60 + m
+}
+
+function scheduleShiftHours_(shift, defaultStart, defaultEnd) {
+  var s = (shift.start && String(shift.start).trim()) || defaultStart || '09:00'
+  var e = (shift.end && String(shift.end).trim()) || defaultEnd || '23:00'
+  var startM = scheduleTimeToMinutes_(s)
+  var endM = scheduleTimeToMinutes_(e)
+  if (endM <= startM) endM += 24 * 60
+  return Math.max(0, (endM - startM) / 60)
+}
+
+function scheduleNormalizeRateHistory_(rateHistory) {
+  if (!Array.isArray(rateHistory)) return []
+  return rateHistory
+    .map(function (r) {
+      var from = String((r && r.from) || '').trim()
+      var toRaw = r && r.to != null ? String(r.to).trim() : ''
+      var to = toRaw || null
+      var modeRaw = String((r && r.mode) || '').trim()
+      var rate = Number(r && r.rate)
+      if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from)) return null
+      if (to && !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(to)) return null
+      if (to && to < from) to = from
+      if (isNaN(rate) || rate < 0) return null
+      var mode = modeRaw === 'from' || modeRaw === 'day' || modeRaw === 'period' ? modeRaw : ''
+      if (!mode) {
+        if (!to) mode = 'from'
+        else if (to === from) mode = 'day'
+        else mode = 'period'
+      }
+      if (mode === 'from') to = null
+      if (mode === 'day') to = from
+      if (mode === 'period' && !to) to = from
+      return { from: from, to: to, mode: mode, rate: Math.round(rate) }
+    })
+    .filter(Boolean)
+    .sort(function (a, b) {
+      var d = a.from.localeCompare(b.from)
+      if (d !== 0) return d
+      if (!a.to && b.to) return -1
+      if (a.to && !b.to) return 1
+      return String(a.to || '').localeCompare(String(b.to || ''))
+    })
+}
+
+function scheduleRateForDate_(ymd, employee) {
+  var history = scheduleNormalizeRateHistory_(employee && employee.rateHistory)
+  var baseRate = Math.max(0, Math.round(Number(employee && employee.hourlyRate) || 0))
+  if (!history.length) return baseRate
+  var applied = baseRate
+  for (var i = 0; i < history.length; i++) {
+    var item = history[i]
+    if (item.from > ymd) break
+    var inRange = !item.to || ymd <= item.to
+    if (inRange) applied = item.rate
+  }
+  return applied
+}
+
+function scheduleShortageDeductionsEqualCents_(employeeCount, shortageCents) {
+  var n = Math.max(0, Math.floor(employeeCount))
+  if (n === 0 || shortageCents <= 0) {
+    var empty = []
+    for (var z = 0; z < n; z++) empty.push(0)
+    return empty
+  }
+  var base = Math.floor(shortageCents / n)
+  var rem = shortageCents - base * n
+  var out = []
+  for (var i = 0; i < n; i++) out.push(base)
+  for (var j = 0; j < rem; j++) out[j] += 1
+  return out
+}
+
+function scheduleMonthDates_(monthKey) {
+  var parts = String(monthKey || '').split('-')
+  var year = parseInt(parts[0], 10)
+  var month = parseInt(parts[1], 10)
+  if (isNaN(year) || isNaN(month)) return []
+  var days = new Date(year, month, 0).getDate()
+  var mm = String(month).padStart(2, '0')
+  var out = []
+  for (var d = 1; d <= days; d++) {
+    out.push(year + '-' + mm + '-' + String(d).padStart(2, '0'))
+  }
+  return out
+}
+
+function computePayrollForEmployee_(employee, monthEmployees, monthShifts, monthKey, shortageAmount, monthBonuses, defaultStart, defaultEnd) {
+  var dates = scheduleMonthDates_(monthKey)
+  var datesSet = {}
+  dates.forEach(function (d) {
+    datesSet[d] = true
+  })
+  var hours = 0
+  var pay = 0
+  monthShifts.forEach(function (s) {
+    if (String(s.employeeId) !== String(employee.id)) return
+    if (!datesSet[s.date]) return
+    var h = scheduleShiftHours_(s, defaultStart, defaultEnd)
+    var rate = scheduleRateForDate_(s.date, employee)
+    hours += h
+    pay += h * rate
+  })
+  pay = Math.round(pay)
+  var empCount = monthEmployees.length
+  var shortageCents = Math.round(Math.max(0, Number(shortageAmount) || 0) * 100)
+  var grossCents = monthEmployees.map(function (e) {
+    var g = 0
+    monthShifts.forEach(function (s) {
+      if (String(s.employeeId) !== String(e.id)) return
+      if (!datesSet[s.date]) return
+      var h = scheduleShiftHours_(s, defaultStart, defaultEnd)
+      g += h * scheduleRateForDate_(s.date, e)
+    })
+    return Math.round(g) * 100
+  })
+  var dedCents = scheduleShortageDeductionsEqualCents_(empCount, shortageCents)
+  var empIndex = -1
+  for (var i = 0; i < monthEmployees.length; i++) {
+    if (String(monthEmployees[i].id) === String(employee.id)) {
+      empIndex = i
+      break
+    }
+  }
+  var gC = empIndex >= 0 ? grossCents[empIndex] || 0 : Math.round(pay) * 100
+  var dC = empIndex >= 0 ? dedCents[empIndex] || 0 : 0
+  var bonus = Math.round(Math.max(0, Number(monthBonuses[employee.id]) || 0))
+  var nC = Math.max(0, gC - dC + bonus * 100)
+  return {
+    hourlyRate: Number(employee.hourlyRate) >= 0 ? Number(employee.hourlyRate) : 0,
+    hours: Math.round(hours * 100) / 100,
+    gross: Math.round(gC / 100),
+    deduction: Math.round(dC / 100),
+    bonus: bonus,
+    net: Math.round(nC / 100),
+  }
+}
+
+function verifyPayrollPin(body) {
+  var employeeId = String(body.employeeId || '').trim()
+  var pin = String(body.pin || '').trim()
+  var monthKey = String(body.monthKey || '').trim()
+  if (!employeeId || !pin || !/^[0-9]{4}-[0-9]{2}$/.test(monthKey)) {
+    return jsonResponse({ error: 'нужны employeeId, pin и monthKey' })
+  }
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID)
+  migrateLegacyScheduleIfNeeded_(ss)
+  var globalSheet = getScheduleSheet_(ss)
+  var defaultStart = '09:00'
+  var defaultEnd = '23:00'
+  try {
+    var globalRaw = globalSheet.getRange(1, 1).getValue()
+    if (globalRaw && String(globalRaw).trim()) {
+      var g = JSON.parse(String(globalRaw))
+      if (g && typeof g === 'object') {
+        defaultStart = String(g.defaultStart || defaultStart).trim() || defaultStart
+        defaultEnd = String(g.defaultEnd || defaultEnd).trim() || defaultEnd
+      }
+    }
+  } catch (e) {
+    // keep defaults
+  }
+  var monthSheet = ss.getSheetByName(scheduleMonthSheetName_(monthKey))
+  if (!monthSheet) return jsonResponse({ error: 'invalid pin' })
+  var part = readMonthSheetPayload_(monthSheet)
+  var monthEmployees = Array.isArray(part.employees) ? part.employees : []
+  var employee = null
+  for (var i = 0; i < monthEmployees.length; i++) {
+    if (String(monthEmployees[i].id) === employeeId) {
+      employee = monthEmployees[i]
+      break
+    }
+  }
+  if (!employee) return jsonResponse({ error: 'invalid pin' })
+  var storedPin = String(employee.payrollPin || '').trim()
+  var isAdmin = pin === PIN
+  if (!isAdmin && (storedPin.length !== 4 || pin !== storedPin)) {
+    return jsonResponse({ error: 'invalid pin' })
+  }
+  var shortageMap = part.shortageByMonth || {}
+  var shortageAmount = shortageMap[monthKey] !== undefined ? Number(shortageMap[monthKey]) : 0
+  var monthBonuses = {}
+  if (part.bonusesByMonth && part.bonusesByMonth[monthKey] && typeof part.bonusesByMonth[monthKey] === 'object') {
+    monthBonuses = part.bonusesByMonth[monthKey]
+  }
+  var payout = computePayrollForEmployee_(
+    employee,
+    monthEmployees,
+    part.shifts || [],
+    monthKey,
+    shortageAmount,
+    monthBonuses,
+    defaultStart,
+    defaultEnd,
+  )
+  return jsonResponse({ success: true, payout: payout })
+}
+
 function getSchedule() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID)
   migrateLegacyScheduleIfNeeded_(ss)
@@ -921,7 +1150,7 @@ function getSchedule() {
     var mk = sh.getName().substring(SCHEDULE_MONTH_PREFIX.length)
     const part = readMonthSheetPayload_(sh)
     if (Array.isArray(part.employees)) {
-      employeesByMonth[String(mk)] = part.employees
+      employeesByMonth[String(mk)] = part.employees.map(sanitizeEmployeeForClient_)
     }
     part.shifts.forEach(function (s) {
       allShifts.push(s)
@@ -1083,6 +1312,15 @@ function updateSchedule(body) {
       safe.employeesByMonth[mk] && Array.isArray(safe.employeesByMonth[mk])
         ? safe.employeesByMonth[mk]
         : []
+    var existingSheet = ss.getSheetByName(scheduleMonthSheetName_(mk))
+    var existingEmployees = []
+    if (existingSheet) {
+      existingEmployees = readMonthSheetPayload_(existingSheet).employees || []
+    }
+    var existingById = {}
+    existingEmployees.forEach(function (ex) {
+      existingById[String(ex.id)] = ex
+    })
     var monthEmployees = monthEmployeesRaw.map(function (e) {
       var rates = Array.isArray(e.rateHistory)
         ? e.rateHistory
@@ -1115,6 +1353,7 @@ function updateSchedule(body) {
         color: String(e.color || '#f0d4cf').trim(),
         hourlyRate: Number(e.hourlyRate) >= 0 ? Number(e.hourlyRate) : 0,
         rateHistory: rates,
+        payrollPin: mergeEmployeePayrollPin_(e, existingById[String(e.id)]),
       }
     })
     writeMonthScheduleSheet_(ss, mk, {

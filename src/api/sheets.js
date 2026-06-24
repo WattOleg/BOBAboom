@@ -414,6 +414,34 @@ export async function updateSchedule(schedule, pin) {
   })
 }
 
+export async function verifyPayrollPin({ employeeId, pin, monthKey }) {
+  if (!employeeId || !pin || !monthKey) {
+    throw new Error('Не указан сотрудник, PIN или месяц')
+  }
+  if (!BASE_URL) {
+    return {
+      success: true,
+      payout: {
+        hourlyRate: 300,
+        hours: 0,
+        gross: 0,
+        deduction: 0,
+        bonus: 0,
+        net: 0,
+      },
+    }
+  }
+  const data = await requestJson(BASE_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action: 'verifyPayrollPin', employeeId, pin, monthKey }),
+  })
+  if (data.error) {
+    if (data.error === 'invalid pin') throw new Error('Неверный PIN')
+    throw new Error(translateGasError(data.error))
+  }
+  return data
+}
+
 export async function fetchWriteoffs() {
   if (!BASE_URL) {
     return offlineWriteoffsState()

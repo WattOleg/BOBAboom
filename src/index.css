@@ -1921,6 +1921,64 @@ h1 {
   margin-bottom: 8px;
 }
 
+.schedule-payroll-hint {
+  margin: 0 0 10px;
+}
+
+.schedule-total-row.is-payroll-locked {
+  cursor: pointer;
+}
+
+.schedule-total-row.is-payroll-locked:active {
+  opacity: 0.88;
+}
+
+.schedule-payroll-mask {
+  letter-spacing: 0.12em;
+  color: var(--text3);
+}
+
+.schedule-payroll-rate {
+  display: block;
+  margin-top: 2px;
+}
+
+.schedule-payroll-pin input {
+  max-width: 88px;
+}
+
+.payroll-pin-subtitle {
+  margin: 0 0 12px;
+  text-align: center;
+}
+
+.payroll-pin-verifying {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.payroll-pin-error {
+  text-align: center;
+  margin: 0 0 10px;
+}
+
+.stop-list-add-btn,
+.stop-list-reload-btn,
+.stop-list-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 88px;
+}
+
+.stop-list-delete-btn {
+  min-width: 72px;
+}
+
 .floating-top-btn {
   position: fixed;
   right: calc(var(--page-pad) + env(safe-area-inset-right, 0px));

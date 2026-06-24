@@ -177,7 +177,23 @@ function scheduleToPdfContent(payload) {
   ]
 
   const summary = payload.summary
-  const summaryBody = [
+  const blocks = [
+    { text: 'ГРАФИК СМЕН', style: 'title' },
+    { text: toText(payload.title), style: 'meta', bold: true, fontSize: 12 },
+    { text: `Сформировано: ${generated}`, style: 'meta', fontSize: 9, color: '#555' },
+    { text: 'Календарь', style: 'subtitle' },
+    {
+      table: {
+        widths: [78, '*'],
+        dontBreakRows: false,
+        body: calendarBody,
+      },
+      layout: pdfTableLayout,
+    },
+  ]
+
+  if (summary) {
+    const summaryBody = [
     [
       { text: 'Сотрудник', style: 'headCell' },
       { text: 'Часы', style: 'headCell', alignment: 'right' },
@@ -214,30 +230,20 @@ function scheduleToPdfContent(payload) {
       {},
       { text: String(summary.netPay), style: 'footCell', alignment: 'right', fontSize: 12 },
     ],
-  ]
+    ]
+    blocks.push(
+      { text: 'Итого за месяц', style: 'subtitle' },
+      {
+        table: {
+          widths: ['*', 52, 64, 72],
+          body: summaryBody,
+        },
+        layout: pdfTableLayout,
+      },
+    )
+  }
 
-  return [
-    { text: 'ГРАФИК СМЕН', style: 'title' },
-    { text: toText(payload.title), style: 'meta', bold: true, fontSize: 12 },
-    { text: `Сформировано: ${generated}`, style: 'meta', fontSize: 9, color: '#555' },
-    { text: 'Календарь', style: 'subtitle' },
-    {
-      table: {
-        widths: [78, '*'],
-        dontBreakRows: false,
-        body: calendarBody,
-      },
-      layout: pdfTableLayout,
-    },
-    { text: 'Итого за месяц', style: 'subtitle' },
-    {
-      table: {
-        widths: ['*', 52, 64, 72],
-        body: summaryBody,
-      },
-      layout: pdfTableLayout,
-    },
-  ]
+  return blocks
 }
 
 function writeoffsToPdfContent(payload) {

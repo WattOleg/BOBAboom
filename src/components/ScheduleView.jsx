@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { verifyPayrollPin } from '../api/sheets'
+import PayrollPinModal from './PayrollPinModal'
 import { exportScheduleToPdf } from '../utils/pdfExport'
 import {
   addDaysYmd,
@@ -38,6 +40,32 @@ function newEmployeeId() {
 /** Суммы в тенге без копеек (для отображения) */
 function tenge(n) {
   return Math.round(Number(n) || 0)
+}
+
+const PAYROLL_SESSION_KEY = 'tk_payroll_unlocked_v1'
+
+function readPayrollSession(monthKey) {
+  try {
+    const raw = sessionStorage.getItem(PAYROLL_SESSION_KEY)
+    if (!raw) return {}
+    const all = JSON.parse(raw)
+    return all && typeof all === 'object' && all[monthKey] && typeof all[monthKey] === 'object'
+      ? all[monthKey]
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function writePayrollSession(monthKey, monthData) {
+  try {
+    const raw = sessionStorage.getItem(PAYROLL_SESSION_KEY)
+    const all = raw ? JSON.parse(raw) : {}
+    all[monthKey] = monthData
+    sessionStorage.setItem(PAYROLL_SESSION_KEY, JSON.stringify(all))
+  } catch {
+    // ignore storage errors
+  }
 }
 
 function softTint(hex, alpha = 0.2) {
@@ -107,6 +135,9 @@ function ScheduleView({
   const [scheduleTab, setScheduleTab] = useState('calendar')
   const [calendarEmployeeFilter, setCalendarEmployeeFilter] = useState('')
   const [payrollEmployeeFilter, setPayrollEmployeeFilter] = useState('')
+  const [payrollUnlocked, setPayrollUnlocked] = useState({})
+  const [payrollPinModal, setPayrollPinModal] = useState({ open: false, employeeId: '', employeeName: '' })
+  const [payrollPinVerifying, setPayrollPinVerifying] = useState(false)
   const [dayModal, setDayModal] = useState(null)
   const [dayModalError, setDayModalError] = useState('')
   const [pdfBusy, setPdfBusy] = useState(false)
@@ -137,6 +168,10 @@ function ScheduleView({
 
   const dates = useMemo(() => monthDateStrings(year, month), [year, month])
   const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`
+
+  useEffect(() => {
+    setPayrollUnlocked(readPayrollSession(monthKey))
+  }, [monthKey])
   const monthEmployees = useMemo(() => {
     const byMonth = data.employeesByMonth || {}
     const list = byMonth[monthKey]
@@ -236,6 +271,67 @@ function ScheduleView({
     () => new Map(employeePayouts.map((row) => [row.id, row])),
     [employeePayouts],
   )
+
+  const openPayrollPinModal = useCallback(
+    (employeeId) => {
+      if (canEdit || !employeeId) return
+      if (payrollUnlocked[employeeId]) return
+      const emp = (monthEmployees || []).find((e) => e.id === employeeId)
+      setPayrollPinModal({
+        open: true,
+        employeeId,
+        employeeName: emp?.name || 'Сотрудник',
+      })
+    },
+    [canEdit, monthEmployees, payrollUnlocked],
+  )
+
+  const closePayrollPinModal = () => {
+    setPayrollPinModal({ open: false, employeeId: '', employeeName: '' })
+  }
+
+  const handlePayrollPinVerify = async (pin) => {
+    const { employeeId } = payrollPinModal
+    if (!employeeId) return false
+    setPayrollPinVerifying(true)
+    try {
+      const res = await verifyPayrollPin({ employeeId, pin, monthKey })
+      if (!res?.success || !res.payout) return false
+      const next = { ...payrollUnlocked, [employeeId]: res.payout }
+      setPayrollUnlocked(next)
+      writePayrollSession(monthKey, next)
+      closePayrollPinModal()
+      return true
+    } finally {
+      setPayrollPinVerifying(false)
+    }
+  }
+
+  const handlePayrollFilterChange = (employeeId) => {
+    setPayrollEmployeeFilter(employeeId)
+    if (employeeId && !canEdit && !payrollUnlocked[employeeId]) {
+      openPayrollPinModal(employeeId)
+    }
+  }
+
+  const getPayrollDisplayRow = (employeeId) => {
+    const hours = (totals[employeeId] || { hours: 0 }).hours
+    if (canEdit) {
+      const row = payoutById.get(employeeId) || { hours: 0, gross: 0, net: 0 }
+      return { ...row, hours, hourlyRate: null, locked: false }
+    }
+    const unlocked = payrollUnlocked[employeeId]
+    if (unlocked) {
+      return {
+        hours: unlocked.hours ?? hours,
+        gross: unlocked.gross,
+        net: unlocked.net,
+        hourlyRate: unlocked.hourlyRate,
+        locked: false,
+      }
+    }
+    return { hours, gross: null, net: null, hourlyRate: null, locked: true }
+  }
 
   const setShortageForMonth = (raw) => {
     const sm = { ...shortageMap }
@@ -536,13 +632,15 @@ function ScheduleView({
       title: monthLabel,
       filenameStem: monthKey,
       calendarRows,
-      summary: {
-        rows: summaryRows,
-        totalHours: grandTotal.hours,
-        totalGross: tenge(grandTotal.pay),
-        shortage: hasShortageKey ? tenge(shortageAmount) : 0,
-        netPay: tenge(netPay),
-      },
+      summary: canEdit
+        ? {
+            rows: summaryRows,
+            totalHours: grandTotal.hours,
+            totalGross: tenge(grandTotal.pay),
+            shortage: hasShortageKey ? tenge(shortageAmount) : 0,
+            netPay: tenge(netPay),
+          }
+        : null,
     }
   }, [
     dates,
@@ -556,6 +654,7 @@ function ScheduleView({
     hasShortageKey,
     shortageAmount,
     netPay,
+    canEdit,
   ])
 
   const handleExportPdf = async () => {
@@ -728,6 +827,22 @@ function ScheduleView({
                     disabled={!canEdit}
                   />
                 </label>
+                {canEdit ? (
+                  <label className="schedule-rate schedule-payroll-pin">
+                    PIN выплат
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={4}
+                      value={e.payrollPin ?? ''}
+                      onChange={(ev) =>
+                        updateEmployee(e.id, { payrollPin: ev.target.value.replace(/\D/g, '').slice(0, 4) })
+                      }
+                      placeholder={e.hasPayrollPin ? '••••' : '4 цифры'}
+                    />
+                  </label>
+                ) : null}
                 {canEdit ? (
                   <div className="schedule-rates">
                     <div className="schedule-rates-head">
@@ -957,9 +1072,14 @@ function ScheduleView({
       {scheduleTab === 'payroll' ? (
       <div className="schedule-totals card-primary">
         <h4>Итого за месяц</h4>
+        {!canEdit ? (
+          <p className="muted small schedule-payroll-hint">
+            Выберите сотрудника и введите PIN, чтобы увидеть ставку и суммы к выплате.
+          </p>
+        ) : null}
         <label className="schedule-modal-field schedule-payroll-filter">
           Фильтр по сотруднику
-          <select value={payrollEmployeeFilter} onChange={(e) => setPayrollEmployeeFilter(e.target.value)}>
+          <select value={payrollEmployeeFilter} onChange={(e) => handlePayrollFilterChange(e.target.value)}>
             <option value="">Все</option>
             {(monthEmployees || []).map((e) => (
               <option key={e.id} value={e.id}>
@@ -979,18 +1099,57 @@ function ScheduleView({
           {(monthEmployees || [])
             .filter((e) => !payrollEmployeeFilter || e.id === payrollEmployeeFilter)
             .map((e) => {
-              const row = payoutById.get(e.id) || { hours: 0, gross: 0, deduction: 0, bonus: 0, net: 0 }
+              const row = getPayrollDisplayRow(e.id)
               return (
-                <div key={e.id} className="schedule-total-row">
+                <div
+                  key={e.id}
+                  className={`schedule-total-row ${row.locked ? 'is-payroll-locked' : ''}`}
+                  onClick={row.locked ? () => openPayrollPinModal(e.id) : undefined}
+                  onKeyDown={
+                    row.locked
+                      ? (ev) => {
+                          if (ev.key === 'Enter' || ev.key === ' ') {
+                            ev.preventDefault()
+                            openPayrollPinModal(e.id)
+                          }
+                        }
+                      : undefined
+                  }
+                  role={row.locked ? 'button' : undefined}
+                  tabIndex={row.locked ? 0 : undefined}
+                >
                   <span className="schedule-total-dot" style={{ background: e.color }} />
-                  <span className="schedule-total-name">{e.name}</span>
+                  <span className="schedule-total-name">
+                    {e.name}
+                    {!canEdit && row.hourlyRate != null ? (
+                      <span className="schedule-payroll-rate muted small">{row.hourlyRate} ₸/час</span>
+                    ) : null}
+                  </span>
                   <strong className="schedule-total-col-num">{row.hours} ч</strong>
-                  <strong className="schedule-total-col-num">{tenge(row.gross)} ₸</strong>
-                  <strong className="schedule-total-col-num schedule-total-net">{tenge(row.net)} ₸</strong>
+                  <strong className="schedule-total-col-num">
+                    {row.locked ? (
+                      <span className="schedule-payroll-mask" title="Введите PIN">
+                        ••••
+                      </span>
+                    ) : (
+                      `${tenge(row.gross)} ₸`
+                    )}
+                  </strong>
+                  <strong className="schedule-total-col-num schedule-total-net">
+                    {row.locked ? (
+                      <span className="schedule-payroll-mask" title="Введите PIN">
+                        ••••
+                      </span>
+                    ) : (
+                      `${tenge(row.net)} ₸`
+                    )}
+                  </strong>
                 </div>
               )
             })}
         </div>
+        {canEdit ? (
+          <>
         <div className="schedule-grand">
           <span>Всего часов</span>
           <strong>{grandTotal.hours} ч</strong>
@@ -1042,8 +1201,19 @@ function ScheduleView({
           <span>К выплате всего</span>
           <strong>{tenge(netPay)} ₸</strong>
         </div>
+          </>
+        ) : null}
       </div>
       ) : null}
+
+      <PayrollPinModal
+        isOpen={payrollPinModal.open}
+        title="PIN выплат"
+        subtitle={payrollPinModal.employeeName ? `Сотрудник: ${payrollPinModal.employeeName}` : ''}
+        onVerify={handlePayrollPinVerify}
+        onClose={closePayrollPinModal}
+        verifying={payrollPinVerifying}
+      />
 
       {patternOpen ? (
         <div className="export-modal-backdrop" onClick={() => setPatternOpen(false)}>
