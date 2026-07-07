@@ -1,14 +1,15 @@
 :root {
-  --bg: #f5f4f0;
+  --bg: #f4f9ff;
   --surface: #ffffff;
-  --surface2: #eeedea;
-  --text: #1a1a18;
-  --text2: #6b6b65;
-  --text3: #a8a89f;
-  --accent: #1a1a18;
-  --green-tag: #c8d8b2;
-  --pink-tag: #f0d4cf;
-  --filter-active: #111111;
+  --surface2: #eaf4ff;
+  --text: #0f1b33;
+  --text2: #404f6d;
+  --text3: #6b7c99;
+  --accent: #0b63d6; /* deeper blue */
+  --accent-strong: #063a9e; /* stronger deep blue */
+  --green-tag: #dbeafe;
+  --pink-tag: #dbeafe;
+  --filter-active: #063a9e;
   --radius-card: 18px;
   --radius-sm: 12px;
   /* Единые поля экрана на мобильных: 16px + safe-area */
@@ -167,6 +168,23 @@ button,
   object-fit: contain;
   border-radius: 999px;
   flex: 0 0 auto;
+}
+
+.title-logo-badge {
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  box-shadow: 0 10px 24px rgba(11, 99, 214, 0.24);
+}
+
+.title-brand {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 
 .title-menu-caret {
@@ -833,10 +851,11 @@ h1 {
 
 .pin-modal {
   width: min(420px, calc(100vw - 2 * var(--page-pad)));
-  background: #151515;
-  color: white;
+  background: var(--surface);
+  color: var(--text);
   border-radius: 20px;
   padding: var(--page-pad);
+  box-shadow: 0 18px 50px rgba(13, 36, 76, 0.16);
 }
 
 .pin-dots {
@@ -854,8 +873,35 @@ h1 {
 }
 
 .pin-dots .filled {
-  background: #fff;
-  border-color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.auth-input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 0 12px;
+}
+
+.auth-submit {
+  width: 100%;
+}
+
+.auth-hint {
+  margin: 8px 0 0;
+}
+
+.auth-error {
+  margin: 0;
 }
 
 .pin-pad {
