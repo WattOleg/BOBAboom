@@ -14,11 +14,34 @@ if (isSupabaseConfigured) {
   // provide minimal shims used by the app
   supabase = {
     auth: {
-      getSession: async () => ({ data: { session: null } })
+      getSession: async () => ({ data: { session: null } }),
+      getSessionFromUrl: async () => ({ data: { session: null } }),
     },
     from: () => ({ select: async () => ({ data: [], error: null }) }),
     // generic fallback for other method access
     rpc: async () => ({ data: null, error: new Error('Supabase not configured') })
+  }
+}
+
+function isAuthRedirectUrl() {
+  if (typeof window === 'undefined') return false
+  const url = new URL(window.location.href)
+  return (
+    window.location.hash.includes('access_token') ||
+    window.location.hash.includes('refresh_token') ||
+    url.searchParams.has('access_token') ||
+    url.searchParams.has('refresh_token') ||
+    url.searchParams.has('error_description')
+  )
+}
+
+export async function initAuth() {
+  if (!isSupabaseConfigured || !isAuthRedirectUrl()) return
+  try {
+    await supabase.auth.getSessionFromUrl({ storeSession: true })
+    window.history.replaceState(null, '', window.location.pathname)
+  } catch {
+    // ignore parsing errors; session may still be available through regular getSession
   }
 }
 

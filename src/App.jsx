@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import supabase, { getSession } from './api/supabaseClient'
+import supabase, { getSession, initAuth } from './api/supabaseClient'
 import ListView from './components/ListView'
 import DetailView from './components/DetailView'
 import EditOverlay from './components/EditOverlay'
@@ -293,6 +293,7 @@ function App() {
     let mounted = true
     ;(async () => {
       try {
+        await initAuth()
         const session = await getSession()
         if (!mounted) return
         if (session && session.user) {
