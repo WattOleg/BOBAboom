@@ -15,14 +15,20 @@ function isPhone(value) {
 }
 
 function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB' }) {
-  const [credential, setCredential] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [mode, setMode] = useState('signIn')
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     if (!isOpen) {
-      setCredential('')
+      setEmail('')
+      setPassword('')
+      setMode('signIn')
       setError('')
+      setSuccess('')
       setSubmitting(false)
     }
   }, [isOpen])
@@ -31,29 +37,49 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB' }) {
 
   const submit = (event) => {
     event.preventDefault()
-    const value = normalizeCredential(credential)
-    if (!value) {
-      setError('Введите email или номер телефона')
+    const normalizedEmail = normalizeCredential(email)
+    const normalizedPassword = normalizeCredential(password)
+
+    if (!normalizedEmail || !normalizedPassword) {
+      setError('Введите email и пароль')
       return
     }
-    if (!isEmail(value) && !isPhone(value)) {
-      setError('Введите корректный email или номер телефона')
+    if (!isEmail(normalizedEmail)) {
+      setError('Введите корректный email')
+      return
+    }
+    if (normalizedPassword.length < 6) {
+      setError('Пароль должен быть не менее 6 символов')
       return
     }
 
     ;(async () => {
       setSubmitting(true)
       setError('')
+      setSuccess('')
       try {
-        if (isEmail(value)) {
-          const { error } = await supabase.auth.signInWithOtp({ email: value, options: { emailRedirectTo: window.location.origin } })
+        if (mode === 'signIn') {
+          const { data, error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password: normalizedPassword })
           if (error) throw error
-          setError('Ссылка для входа отправлена на указанный email. Проверьте почту.')
+          if (data?.session?.user) {
+            onSuccess({ id: data.session.user.id, email: data.session.user.email || null, phone: data.session.user.phone || null })
+          } else {
+            setSuccess('Вход выполнен. Если вы не видите интерфейс, обновите страницу.')
+          }
         } else {
-          // Phone OTP requires SMS provider configuration in Supabase project.
-          const { error } = await supabase.auth.signInWithOtp({ phone: value })
+          const { data, error } = await supabase.auth.signUp({ email: normalizedEmail, password: normalizedPassword })
           if (error) throw error
-          setError('Код отправлен на указанный номер. После подтверждения вы войдёте автоматически.')
+          if (data?.user) {
+            const userId = data.user.id
+            await supabase.from('app_data').insert({
+              key: `profile:${userId}`,
+              value: { email: normalizedEmail, createdAt: new Date().toISOString() },
+            })
+            setSuccess('Пользователь создан. Войдите с помощью email и пароля.')
+            setMode('signIn')
+          } else {
+            setSuccess('Пользователь зарегистрирован. Проверьте почту для подтверждения.')
+          }
         }
       } catch (err) {
         setError(err?.message || 'Ошибка при попытке войти')
@@ -66,25 +92,44 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB' }) {
   return (
     <div className="pin-backdrop" onClick={onClose}>
       <div className="pin-modal auth-modal" onClick={(event) => event.stopPropagation()}>
-        <h3>{title}</h3>
+        <h3>{mode === 'signIn' ? 'Вход в BB' : 'Регистрация в BB'}</h3>
         <p className="muted auth-hint">
           Вход обязателен для создания, редактирования и удаления техкарт в BB.
         </p>
         <form onSubmit={submit} className="auth-form">
           <input
             className="auth-input"
-            type="text"
+            type="email"
             autoFocus
             inputMode="email"
-            placeholder="Email или номер телефона"
-            value={credential}
-            onChange={(event) => setCredential(event.target.value)}
+            placeholder="Email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+          <input
+            className="auth-input"
+            type="password"
+            placeholder="Пароль"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
           />
           <button type="submit" className="btn btn-dark auth-submit" disabled={submitting}>
-            {submitting ? 'Входим...' : 'Войти'}
+            {submitting ? (mode === 'signIn' ? 'Входим...' : 'Регистрируем...') : mode === 'signIn' ? 'Войти' : 'Зарегистрироваться'}
           </button>
           {error ? <p className="error auth-error">{error}</p> : null}
+          {success ? <p className="muted auth-success">{success}</p> : null}
         </form>
+        <button
+          type="button"
+          className="ghost-btn auth-toggle"
+          onClick={() => {
+            setMode(mode === 'signIn' ? 'signUp' : 'signIn')
+            setError('')
+            setSuccess('')
+          }}
+        >
+          {mode === 'signIn' ? 'Создать новый аккаунт' : 'Уже есть аккаунт? Войти'}
+        </button>
       </div>
     </div>
   )
