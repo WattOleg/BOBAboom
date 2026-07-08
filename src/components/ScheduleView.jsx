@@ -17,7 +17,7 @@ import {
   weekdayShortRu,
 } from '../utils/scheduleMath'
 
-const PRESET_COLORS = ['#f0d4cf', '#c8d8b2', '#b8d4e8', '#e8d4f5', '#ffe4b3', '#ffd4dc', '#d4e8d4', '#e0d4c8']
+const PRESET_COLORS = ['#dbeafe', '#dbe7ff', '#bfdbfe', '#93c5fd', '#bae6fd', '#c7d2fe', '#dbeafe', '#bfdbfe']
 const SHIFT_TEMPLATES = {
   morning: { label: 'Утро', start: '09:00', end: '17:00' },
   evening: { label: 'Вечер', start: '15:00', end: '23:00' },
@@ -904,7 +904,7 @@ function ScheduleView({
                   <input
                     type="color"
                     className="schedule-color-input"
-                    value={e.color?.startsWith('#') ? e.color : '#f0d4cf'}
+                    value={e.color?.startsWith('#') ? e.color : '#dbeafe'}
                     onChange={(ev) => updateEmployee(e.id, { color: ev.target.value })}
                   />
                 ) : null}

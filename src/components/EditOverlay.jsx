@@ -143,8 +143,8 @@ function EditOverlay({ isOpen, card, categories, onClose, onSave }) {
             : saved
               ? '✓ Сохранено'
               : isCreate
-                ? 'Создать → Google Sheets'
-                : 'Сохранить → Google Sheets'}
+                ? 'Создать в BB'
+                : 'Сохранить в BB'}
         </button>
         {isSubmitting ? <p className="muted">Идет связь с сервером...</p> : null}
         {submitError ? <p className="error">{submitError}</p> : null}

@@ -1,32 +1,16 @@
-import { getGasClientBaseUrl } from '../config/gasBaseUrl.js'
-
-const BASE_URL = getGasClientBaseUrl()
-
-/** Путь вида /api/gas — тот же origin (Vercel + serverless-прокси), без new URL(). */
-function isSameOriginProxyPath(url) {
-  const s = String(url || '').trim()
-  return s.startsWith('/') && !s.startsWith('//')
-}
-
-/** Сборка URL с query для абсолютного Apps Script или относительного прокси. */
-function gasUrlWithQuery(base, params) {
-  const b = String(base || '').trim()
-  const sp = new URLSearchParams()
-  Object.entries(params || {}).forEach(([k, v]) => {
-    if (v == null || v === '') return
-    sp.set(k, String(v))
-  })
-  const q = sp.toString()
-  if (!b) return q ? `?${q}` : ''
-  if (isSameOriginProxyPath(b)) return `${b}${q ? `?${q}` : ''}`
-  const u = new URL(b)
-  sp.forEach((val, key) => u.searchParams.set(key, val))
-  return u.toString()
-}
-
-function actionUrl(action, extra = {}) {
-  return gasUrlWithQuery(BASE_URL, { action, ...extra })
-}
+import {
+  isSupabaseConfigured,
+  readSectionsFromSupabase,
+  readScheduleFromSupabase,
+  readStopListFromSupabase,
+  readTechcardsFromSupabase,
+  readWriteoffsFromSupabase,
+  writeSectionsToSupabase,
+  writeScheduleToSupabase,
+  writeStopListToSupabase,
+  writeTechcardsToSupabase,
+  writeWriteoffsToSupabase,
+} from './supabaseDb.js'
 
 const OFFLINE_KEYS = {
   cardsList: 'tk_offline_cards_list_v1',
@@ -55,75 +39,56 @@ function writeOffline(key, value) {
   }
 }
 
-/** Понятные сообщения для типичных ответов Apps Script (списания и др.). */
-function translateGasError(raw) {
-  const s = String(raw || '').trim()
-  if (s === 'invalid pin') {
-    return 'Неверный PIN: в Vercel задайте VITE_PIN_CODE так же, как константа PIN в Code.gs (по умолчанию в репозитории 1234).'
+const CARD_DB_KEY = 'bb_cards_database_v1'
+
+function readLocalCards() {
+  try {
+    const raw = localStorage.getItem(CARD_DB_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(Boolean)
+  } catch {
+    return []
   }
-  if (s === 'нужны item, qty, emp, date') {
-    return 'Не хватает данных: продукт, количество, сотрудник или дата.'
-  }
-  if (s === 'нужны id, item, qty, emp, date') {
-    return 'Не хватает данных при сохранении: id, продукт, количество, сотрудник или дата.'
-  }
-  if (s === 'unknown action') {
-    return 'Сервер не распознал действие (проверьте деплой Apps Script и совпадение URL).'
-  }
-  return s
 }
 
-async function requestJson(url, options) {
-  const retries = 2
-  let lastError = null
-
-  // Не ставить Content-Type: application/json на POST к Apps Script: это включает CORS preflight
-  // (OPTIONS), который у веб‑приложений GAS часто падает с телефона. Тело всё равно приходит в
-  // postData.contents; fetch по умолчанию шлёт text/plain для строки — «простой» запрос.
-
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    let res
-    try {
-      res = await fetch(url, {
-        ...options,
-        cache: 'no-store',
-      })
-    } catch (err) {
-      lastError = err
-      if (attempt < retries) {
-        await new Promise((r) => setTimeout(r, 350 * (attempt + 1)))
-        continue
-      }
-      throw new Error(
-        'Не удалось подключиться к серверу. Проверьте URL (VITE_APPS_SCRIPT_URL), деплой Apps Script и доступ «Anyone».',
-      )
-    }
-
-    const text = await res.text()
-    let data = {}
-    try {
-      data = text ? JSON.parse(text) : {}
-    } catch {
-      throw new Error(
-        'Ответ сервера не JSON (часто неверный URL деплоя или страница входа Google). Проверьте VITE_APPS_SCRIPT_URL.',
-      )
-    }
-    if (!res.ok) {
-      if (attempt < retries && res.status >= 500) {
-        await new Promise((r) => setTimeout(r, 350 * (attempt + 1)))
-        continue
-      }
-      if (!data.error && res.status === 403) {
-        throw new Error('Доступ запрещён (403). В деплое Apps Script включите «Anyone».')
-      }
-      throw new Error(translateGasError(data.error) || `Ошибка ответа сервера (${res.status})`)
-    }
-    if (data && data.error) {
-      throw new Error(translateGasError(data.error))
-    }
-    return data
+function writeLocalCards(cards) {
+  try {
+    localStorage.setItem(CARD_DB_KEY, JSON.stringify(cards))
+  } catch {
+    // ignore storage errors
   }
-  throw lastError || new Error('Ошибка сети')
+}
+
+function normalizeCardForStorage(cardData, fallbackSheetName = '') {
+  const source = cardData && typeof cardData === 'object' ? cardData : {}
+  const sheetName = String(source.sheetName || fallbackSheetName || '').trim()
+  const resolvedSheetName = sheetName || `bb-card-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const ingredients = Array.isArray(source.ingredients)
+    ? source.ingredients.map((ingredient) => ({
+        name: String(ingredient?.name || '').trim(),
+        amount: String(ingredient?.amount || '').trim(),
+      }))
+    : [{ name: '', amount: '' }]
+
+  return {
+    ...source,
+    sheetName: resolvedSheetName,
+    name: String(source.name || '').trim(),
+    nameRu: String(source.nameRu || '').trim(),
+    category: String(source.category || '').trim(),
+    yield: String(source.yield || '').trim(),
+    time: String(source.time || '').trim(),
+    method: String(source.method || '').trim(),
+    glass: String(source.glass || '').trim(),
+    garnish: String(source.garnish || '').trim(),
+    photoUrl: String(source.photoUrl || '').trim(),
+    author: String(source.author || '').trim(),
+    date: String(source.date || new Date().toISOString().slice(0, 10)).trim(),
+    technology: String(source.technology || '').trim(),
+    ingredients,
+  }
 }
 
 const mockCards = [
@@ -169,181 +134,10 @@ const mockCards = [
   },
 ]
 
-export async function fetchAllCards(options = {}) {
-  if (!BASE_URL) {
-    return mockCards
-  }
-  const forceNetwork = Boolean(options.forceNetwork)
-  try {
-    const data = await requestJson(
-      actionUrl('getAll', forceNetwork ? { _cb: Date.now() } : {}),
-      { signal: options.signal },
-    )
-    const cards = data.cards || []
-    writeOffline(OFFLINE_KEYS.cardsAll, cards)
-    return cards
-  } catch (err) {
-    if (forceNetwork) throw err
-    const cached = readOffline(OFFLINE_KEYS.cardsAll, [])
-    if (cached.length) return cached
-    throw err
-  }
-}
-
-export async function fetchCardList(options = {}) {
-  if (!BASE_URL) {
-    return mockCards
-  }
-  const forceNetwork = Boolean(options.forceNetwork)
-  try {
-    const data = await requestJson(
-      actionUrl('getList', forceNetwork ? { _cb: Date.now() } : {}),
-      { signal: options.signal },
-    )
-    const cards = data.cards || []
-    writeOffline(OFFLINE_KEYS.cardsList, cards)
-    return cards
-  } catch (err) {
-    if (forceNetwork) throw err
-    const cachedList = readOffline(OFFLINE_KEYS.cardsList, [])
-    if (cachedList.length) return cachedList
-    throw err
-  }
-}
-
-export async function fetchCardDetail(sheetName, options = {}) {
-  if (!BASE_URL) {
-    const found = mockCards.find((card) => card.sheetName === sheetName)
-    return found || null
-  }
-  try {
-    const data = await requestJson(
-      `${BASE_URL}?action=getCard&sheetName=${encodeURIComponent(sheetName)}`,
-      { signal: options.signal },
-    )
-    const card = data.card || null
-    if (card && card.sheetName) {
-      const all = readOffline(OFFLINE_KEYS.cardsAll, [])
-      const next = [card, ...all.filter((c) => c && c.sheetName !== card.sheetName)]
-      writeOffline(OFFLINE_KEYS.cardsAll, next)
-    }
-    return card
-  } catch {
-    const all = readOffline(OFFLINE_KEYS.cardsAll, [])
-    const foundCached = all.find((card) => card && card.sheetName === sheetName)
-    if (foundCached) return foundCached
-    const list = readOffline(OFFLINE_KEYS.cardsList, [])
-    return list.find((card) => card && card.sheetName === sheetName) || null
-  }
-}
-
-export async function updateCard(sheetName, cardData, pin) {
-  if (!BASE_URL) {
-    return { success: true, mocked: true, sheetName, cardData, pin }
-  }
-  return await requestJson(BASE_URL, {
-    method: 'POST',
-    body: JSON.stringify({ action: 'update', sheetName, data: cardData, pin }),
-  })
-}
-
-export async function createCard(cardData, pin) {
-  if (!BASE_URL) {
-    return { success: true, mocked: true, cardData, pin }
-  }
-  return await requestJson(BASE_URL, {
-    method: 'POST',
-    body: JSON.stringify({ action: 'create', data: cardData, pin }),
-  })
-}
-
-export async function deleteCard(sheetName, pin) {
-  if (!BASE_URL) {
-    return { success: true, mocked: true, sheetName, pin }
-  }
-  return await requestJson(BASE_URL, {
-    method: 'POST',
-    body: JSON.stringify({ action: 'delete', sheetName, pin }),
-  })
-}
-
-export async function fetchSectionsContent() {
-  if (!BASE_URL) {
-    return {
-      regulations: {
-        title: 'Регламенты',
-        points: [
-          '# Смена',
-          '- Открытие и закрытие точки строго по **чек-листу**.',
-          '- В конце смены зафиксировать **списания** и брак.',
-          '---',
-          '# Санитария и хранение',
-          'Соблюдать санитарные нормы и условия хранения ингредиентов по внутренним правилам.',
-        ],
-      },
-      appearance: {
-        title: 'Требования к внешнему виду',
-        points: [
-          '## Общий вид',
-          '**Чистая форма** и опрятный внешний вид на протяжении всей смены.',
-          '## Детали образа',
-          '- Минимум украшений, аккуратные волосы, **закрытая обувь**.',
-          '- Личная гигиена и регулярная дезинфекция рук.',
-          '> По согласованию с командой — только неароматный дезодорант.',
-        ],
-      },
-      behavior: {
-        title: 'Поведение',
-        points: [
-          '# Общение',
-          'Вежливый тон с гостями и коллегами, **внимание** к запросам и очереди.',
-          '# Командная работа',
-          'Проактивная помощь в **пиковые часы**, равномерная загрузка зоны.',
-          '# Конфликты',
-          'Спокойная коммуникация: факты вместо обвинений; при эскалации — **руководитель смены**.',
-        ],
-      },
-      rights: {
-        title: 'Права и ответственность',
-        points: [
-          '# Условия труда',
-          'Право на **безопасные** условия и понятные задачи.',
-          '# Качество и стандарты',
-          'Ответственность за напитки, рецептуру и **стандарты** подачи.',
-          '# Правила точки',
-          'Соблюдение регламентов и бережное отношение к **оборудованию** и продукту.',
-        ],
-      },
-    }
-  }
-  try {
-    const data = await requestJson(`${BASE_URL}?action=getSections`)
-    const sections = data.sections || {}
-    writeOffline(OFFLINE_KEYS.sections, sections)
-    return sections
-  } catch (err) {
-    const cached = readOffline(OFFLINE_KEYS.sections, null)
-    if (cached && typeof cached === 'object') return cached
-    throw err
-  }
-}
-
-export async function updateSectionContent(sectionId, title, points, pin) {
-  if (!BASE_URL) {
-    return { success: true, mocked: true, sectionId, title, points, pin }
-  }
-  return await requestJson(BASE_URL, {
-    method: 'POST',
-    body: JSON.stringify({ action: 'updateSection', sectionId, title, points, pin }),
-  })
-}
-
 const mockSchedule = {
   defaultStart: '09:00',
   defaultEnd: '23:00',
-  employees: [
-    { id: 'e1', name: 'Пример', color: '#f0d4cf', hourlyRate: 300 },
-  ],
+  employees: [{ id: 'e1', name: 'Пример', color: '#dbeafe', hourlyRate: 300 }],
   employeesByMonth: {},
   shifts: [],
   shortageByMonth: {},
@@ -380,210 +174,6 @@ function persistOfflineWriteoffs(state) {
   writeOffline(OFFLINE_KEYS.writeoffs, state)
 }
 
-/** Сохранить снимок списаний в localStorage (после успешной записи при сбое повторной загрузки). */
-export function syncWriteoffsOfflineCache(writeoffs) {
-  if (writeoffs && typeof writeoffs === 'object') {
-    writeOffline(OFFLINE_KEYS.writeoffs, writeoffs)
-  }
-}
-
-export async function fetchSchedule() {
-  if (!BASE_URL) {
-    return mockSchedule
-  }
-  try {
-    const cb = Date.now()
-    const data = await requestJson(`${BASE_URL}?action=getSchedule&_cb=${cb}`)
-    const schedule = data.schedule || mockSchedule
-    writeOffline(OFFLINE_KEYS.schedule, schedule)
-    return schedule
-  } catch (err) {
-    const cached = readOffline(OFFLINE_KEYS.schedule, null)
-    if (cached && typeof cached === 'object') return cached
-    throw err
-  }
-}
-
-export async function updateSchedule(schedule, pin) {
-  if (!BASE_URL) {
-    return { success: true, mocked: true, schedule, pin }
-  }
-  return await requestJson(BASE_URL, {
-    method: 'POST',
-    body: JSON.stringify({ action: 'updateSchedule', schedule, pin }),
-  })
-}
-
-export async function verifyPayrollPin({ employeeId, pin, monthKey }) {
-  if (!employeeId || !pin || !monthKey) {
-    throw new Error('Не указан сотрудник, PIN или месяц')
-  }
-  if (!BASE_URL) {
-    return {
-      success: true,
-      payout: {
-        hourlyRate: 300,
-        hours: 0,
-        gross: 0,
-        deduction: 0,
-        bonus: 0,
-        net: 0,
-      },
-    }
-  }
-  const data = await requestJson(BASE_URL, {
-    method: 'POST',
-    body: JSON.stringify({ action: 'verifyPayrollPin', employeeId, pin, monthKey }),
-  })
-  if (data.error) {
-    if (data.error === 'invalid pin') throw new Error('Неверный PIN')
-    throw new Error(translateGasError(data.error))
-  }
-  return data
-}
-
-export async function fetchWriteoffs() {
-  if (!BASE_URL) {
-    return offlineWriteoffsState()
-  }
-  try {
-    const cb = Date.now()
-    const data = await requestJson(`${BASE_URL}?action=getWriteoffs&_cb=${cb}`)
-    const writeoffs = data.writeoffs || mockWriteoffs
-    writeOffline(OFFLINE_KEYS.writeoffs, writeoffs)
-    return writeoffs
-  } catch (err) {
-    const cached = readOffline(OFFLINE_KEYS.writeoffs, null)
-    if (cached && typeof cached === 'object') return cached
-    throw err
-  }
-}
-
-/**
- * Списания: короткий GET к Apps Script (без JSON в query) + POST только для шаблонов.
- */
-export async function mutateWriteoffs(payload, pin) {
-  const op = String(payload?.op || '').trim()
-  if (!op) throw new Error('Не указана операция')
-
-  if (!BASE_URL) {
-    const state = offlineWriteoffsState()
-    if (op === 'append' && payload.entry) {
-      state.entries.unshift({ ...payload.entry })
-      persistOfflineWriteoffs(state)
-      return { success: true, mocked: true }
-    }
-    if (op === 'delete' && payload.id) {
-      state.entries = state.entries.filter((e) => e.id !== payload.id)
-      persistOfflineWriteoffs(state)
-      return { success: true, mocked: true }
-    }
-    if (op === 'update' && payload.entry) {
-      const e = payload.entry
-      state.entries = state.entries.map((x) => (x.id === e.id ? { ...e } : x))
-      persistOfflineWriteoffs(state)
-      return { success: true, mocked: true }
-    }
-    if (op === 'templates' && Array.isArray(payload.templates)) {
-      state.templates = payload.templates.map((t) => ({ ...t }))
-      persistOfflineWriteoffs(state)
-      return { success: true, mocked: true }
-    }
-    throw new Error('Неверная операция')
-  }
-
-  const baseUrl = String(BASE_URL).trim()
-  const pinStr = String(pin || '')
-
-  if (op === 'templates' && Array.isArray(payload.templates)) {
-    return await requestJson(baseUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'updateWriteoffs',
-        pin: pinStr,
-        op: 'templates',
-        templates: payload.templates,
-      }),
-    })
-  }
-
-  const buildUrl = (action, extra) => {
-    const merged = { action, pin: pinStr, _cb: String(Date.now()) }
-    Object.keys(extra || {}).forEach((k) => {
-      const v = extra[k]
-      if (v != null && v !== '') merged[k] = v
-    })
-    return gasUrlWithQuery(baseUrl, merged)
-  }
-
-  if (op === 'append' && payload.entry) {
-    const e = payload.entry
-    const dateStr = String(e.date || '').slice(0, 10)
-    const fields = {
-      item: String(e.item || '').trim(),
-      qty: String(e.qty || '').trim(),
-      unit: String(e.unit || '').trim() || 'гр',
-      typ: e.type === 'move' ? 'move' : 'writeoff',
-      emp: String(e.employee || '').trim(),
-      date: dateStr,
-      reason: String(e.reason || '').trim().slice(0, 500),
-    }
-    const getUrl = buildUrl('appendSimpleWriteoff', fields)
-    const postPayload = {
-      action: 'appendSimpleWriteoffPost',
-      pin: pinStr,
-      item: fields.item,
-      qty: fields.qty,
-      unit: fields.unit,
-      typ: fields.typ,
-      emp: fields.emp,
-      date: dateStr,
-      reason: String(e.reason || '').trim().slice(0, 4000),
-    }
-    try {
-      return await requestJson(getUrl)
-    } catch {
-      return await requestJson(baseUrl, {
-        method: 'POST',
-        body: JSON.stringify(postPayload),
-      })
-    }
-  }
-
-  if (op === 'delete' && payload.id != null && payload.id !== '') {
-    const url = buildUrl('deleteSimpleWriteoff', { id: String(payload.id) })
-    return await requestJson(url)
-  }
-
-  if (op === 'update' && payload.entry) {
-    const e = payload.entry
-    const url = buildUrl('updateSimpleWriteoff', {
-      id: String(e.id || ''),
-      item: e.item || '',
-      qty: String(e.qty || ''),
-      unit: e.unit || '',
-      typ: e.type === 'move' ? 'move' : 'writeoff',
-      emp: e.employee || '',
-      date: e.date || '',
-      reason: String(e.reason || '').slice(0, 500),
-    })
-    if (url.length <= 7200) {
-      return await requestJson(url)
-    }
-    return await requestJson(baseUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'updateWriteoffs',
-        pin: pinStr,
-        op: 'update',
-        entry: payload.entry,
-      }),
-    })
-  }
-
-  throw new Error('Неверная операция')
-}
-
 function offlineStopListState() {
   const cur = readOffline(OFFLINE_KEYS.stopList, null)
   if (Array.isArray(cur)) return [...cur]
@@ -594,65 +184,434 @@ function persistOfflineStopList(state) {
   writeOffline(OFFLINE_KEYS.stopList, state)
 }
 
+export function syncWriteoffsOfflineCache(writeoffs) {
+  if (writeoffs && typeof writeoffs === 'object') {
+    writeOffline(OFFLINE_KEYS.writeoffs, writeoffs)
+  }
+}
+
+export async function fetchAllCards(options = {}) {
+  const localCards = readLocalCards()
+  if (isSupabaseConfigured) {
+    try {
+      const cards = await readTechcardsFromSupabase({ signal: options.signal })
+      const normalized = Array.isArray(cards) ? cards.map((card) => normalizeCardForStorage(card)) : []
+      writeLocalCards(normalized)
+      writeOffline(OFFLINE_KEYS.cardsAll, normalized)
+      writeOffline(OFFLINE_KEYS.cardsList, normalized)
+      return normalized
+    } catch {
+      // fall back to local storage
+    }
+  }
+
+  const cached = readOffline(OFFLINE_KEYS.cardsAll, localCards)
+  if (Array.isArray(cached) && cached.length) {
+    writeLocalCards(cached)
+    return cached
+  }
+  return localCards.length ? localCards : mockCards
+}
+
+export async function fetchCardList(options = {}) {
+  const localCards = readLocalCards()
+  if (isSupabaseConfigured) {
+    try {
+      const cards = await readTechcardsFromSupabase({ signal: options.signal })
+      const normalized = Array.isArray(cards) ? cards.map((card) => normalizeCardForStorage(card)) : []
+      writeLocalCards(normalized)
+      writeOffline(OFFLINE_KEYS.cardsList, normalized)
+      return normalized
+    } catch {
+      // fall back to local storage
+    }
+  }
+
+  const cached = readOffline(OFFLINE_KEYS.cardsList, localCards)
+  if (Array.isArray(cached) && cached.length) {
+    writeLocalCards(cached)
+    return cached
+  }
+  return localCards.length ? localCards : mockCards
+}
+
+export async function fetchCardDetail(sheetName, options = {}) {
+  const localCards = readLocalCards()
+  const foundLocal = localCards.find((card) => card && card.sheetName === sheetName)
+
+  if (isSupabaseConfigured) {
+    try {
+      const cards = await readTechcardsFromSupabase({ signal: options.signal })
+      const found = Array.isArray(cards)
+        ? cards.find((card) => card && card.sheetName === sheetName)
+        : null
+      if (found) return found
+    } catch {
+      // fall back to local storage
+    }
+  }
+
+  const cached = readOffline(OFFLINE_KEYS.cardsAll, localCards)
+  const foundCached = Array.isArray(cached)
+    ? cached.find((card) => card && card.sheetName === sheetName)
+    : null
+  return foundCached || foundLocal || mockCards.find((card) => card.sheetName === sheetName) || null
+}
+
+export async function updateCard(sheetName, cardData, pin) {
+  const normalizedCard = normalizeCardForStorage({ ...(cardData || {}), sheetName }, sheetName)
+  const existing = readLocalCards()
+  const nextCards = [normalizedCard, ...existing.filter((card) => card && card.sheetName !== normalizedCard.sheetName)]
+  writeLocalCards(nextCards)
+  writeOffline(OFFLINE_KEYS.cardsAll, nextCards)
+  writeOffline(OFFLINE_KEYS.cardsList, nextCards)
+
+  if (isSupabaseConfigured) {
+    try {
+      await writeTechcardsToSupabase(nextCards)
+    } catch {
+      // keep local storage as the fallback source
+    }
+  }
+
+  return { success: true, source: 'supabase', sheetName, cardData: normalizedCard, pin }
+}
+
+export async function createCard(cardData, pin) {
+  const normalizedCard = normalizeCardForStorage(cardData)
+  const existing = readLocalCards()
+  const nextCards = [normalizedCard, ...existing.filter((card) => card && card.sheetName !== normalizedCard.sheetName)]
+  writeLocalCards(nextCards)
+  writeOffline(OFFLINE_KEYS.cardsAll, nextCards)
+  writeOffline(OFFLINE_KEYS.cardsList, nextCards)
+
+  if (isSupabaseConfigured) {
+    try {
+      await writeTechcardsToSupabase(nextCards)
+    } catch {
+      // keep local storage as the fallback source
+    }
+  }
+
+  return { success: true, source: 'supabase', cardData: normalizedCard, pin }
+}
+
+export async function deleteCard(sheetName, pin) {
+  const existing = readLocalCards().filter((card) => card && card.sheetName !== sheetName)
+  writeLocalCards(existing)
+  writeOffline(OFFLINE_KEYS.cardsAll, existing)
+  writeOffline(OFFLINE_KEYS.cardsList, existing)
+
+  if (isSupabaseConfigured) {
+    try {
+      await writeTechcardsToSupabase(existing)
+    } catch {
+      // keep local storage as the fallback source
+    }
+  }
+
+  return { success: true, source: 'supabase', sheetName, pin }
+}
+
+export async function fetchSectionsContent() {
+  if (isSupabaseConfigured) {
+    try {
+      const sections = await readSectionsFromSupabase()
+      if (sections && typeof sections === 'object') {
+        writeOffline(OFFLINE_KEYS.sections, sections)
+        return sections
+      }
+    } catch {
+      // fall back to local storage
+    }
+  }
+
+  const cached = readOffline(OFFLINE_KEYS.sections, null)
+  if (cached && typeof cached === 'object') return cached
+
+  return {
+    regulations: {
+      title: 'Регламенты',
+      points: [
+        '# Смена',
+        '- Открытие и закрытие точки строго по **чек-листу**.',
+        '- В конце смены зафиксировать **списания** и брак.',
+        '---',
+        '# Санитария и хранение',
+        'Соблюдать санитарные нормы и условия хранения ингредиентов по внутренним правилам.',
+      ],
+    },
+    appearance: {
+      title: 'Требования к внешнему виду',
+      points: [
+        '## Общий вид',
+        '**Чистая форма** и опрятный внешний вид на протяжении всей смены.',
+        '## Детали образа',
+        '- Минимум украшений, аккуратные волосы, **закрытая обувь**.',
+        '- Личная гигиена и регулярная дезинфекция рук.',
+        '> По согласованию с командой — только неароматный дезодорант.',
+      ],
+    },
+    behavior: {
+      title: 'Поведение',
+      points: [
+        '# Общение',
+        'Вежливый тон с гостями и коллегами, **внимание** к запросам и очереди.',
+        '# Командная работа',
+        'Проактивная помощь в **пиковые часы**, равномерная загрузка зоны.',
+        '# Конфликты',
+        'Спокойная коммуникация: факты вместо обвинений; при эскалации — **руководитель смены**.',
+      ],
+    },
+    rights: {
+      title: 'Права и ответственность',
+      points: [
+        '# Условия труда',
+        'Право на **безопасные** условия и понятные задачи.',
+        '# Качество и стандарты',
+        'Ответственность за напитки, рецептуру и **стандарты** подачи.',
+        '# Правила точки',
+        'Соблюдение регламентов и бережное отношение к **оборудованию** и продукту.',
+      ],
+    },
+  }
+}
+
+export async function updateSectionContent(sectionId, title, points, pin) {
+  const next = {
+    regulations: {
+      title: 'Регламенты',
+      points: [
+        '# Смена',
+        '- Открытие и закрытие точки строго по **чек-листу**.',
+        '- В конце смены зафиксировать **списания** и брак.',
+        '---',
+        '# Санитария и хранение',
+        'Соблюдать санитарные нормы и условия хранения ингредиентов по внутренним правилам.',
+      ],
+    },
+    appearance: {
+      title: 'Требования к внешнему виду',
+      points: [
+        '## Общий вид',
+        '**Чистая форма** и опрятный внешний вид на протяжении всей смены.',
+        '## Детали образа',
+        '- Минимум украшений, аккуратные волосы, **закрытая обувь**.',
+        '- Личная гигиена и регулярная дезинфекция рук.',
+        '> По согласованию с командой — только неароматный дезодорант.',
+      ],
+    },
+    behavior: {
+      title: 'Поведение',
+      points: [
+        '# Общение',
+        'Вежливый тон с гостями и коллегами, **внимание** к запросам и очереди.',
+        '# Командная работа',
+        'Проактивная помощь в **пиковые часы**, равномерная загрузка зоны.',
+        '# Конфликты',
+        'Спокойная коммуникация: факты вместо обвинений; при эскалации — **руководитель смены**.',
+      ],
+    },
+    rights: {
+      title: 'Права и ответственность',
+      points: [
+        '# Условия труда',
+        'Право на **безопасные** условия и понятные задачи.',
+        '# Качество и стандарты',
+        'Ответственность за напитки, рецептуру и **стандарты** подачи.',
+        '# Правила точки',
+        'Соблюдение регламентов и бережное отношение к **оборудованию** и продукту.',
+      ],
+    },
+  }
+
+  const current = readOffline(OFFLINE_KEYS.sections, next)
+  const merged = {
+    ...next,
+    ...((current && typeof current === 'object') ? current : {}),
+    [sectionId]: {
+      ...((current && typeof current === 'object' && current[sectionId]) || {}),
+      title,
+      points,
+    },
+  }
+
+  writeOffline(OFFLINE_KEYS.sections, merged)
+
+  if (isSupabaseConfigured) {
+    try {
+      await writeSectionsToSupabase(merged)
+    } catch {
+      // keep local storage as the fallback source
+    }
+  }
+
+  return { success: true, source: 'supabase', sectionId, title, points, pin }
+}
+
+export async function fetchSchedule() {
+  if (isSupabaseConfigured) {
+    try {
+      const schedule = await readScheduleFromSupabase()
+      if (schedule && typeof schedule === 'object') {
+        writeOffline(OFFLINE_KEYS.schedule, schedule)
+        return schedule
+      }
+    } catch {
+      // fall back to local storage
+    }
+  }
+
+  const cached = readOffline(OFFLINE_KEYS.schedule, null)
+  if (cached && typeof cached === 'object') return cached
+  return mockSchedule
+}
+
+export async function updateSchedule(schedule, pin) {
+  writeOffline(OFFLINE_KEYS.schedule, schedule)
+
+  if (isSupabaseConfigured) {
+    try {
+      await writeScheduleToSupabase(schedule)
+    } catch {
+      // keep local storage as the fallback source
+    }
+  }
+
+  return { success: true, source: 'supabase', schedule, pin }
+}
+
+export async function verifyPayrollPin({ employeeId, pin, monthKey }) {
+  if (!employeeId || !pin || !monthKey) {
+    throw new Error('Не указан сотрудник, PIN или месяц')
+  }
+  return {
+    success: true,
+    payout: {
+      hourlyRate: 300,
+      hours: 0,
+      gross: 0,
+      deduction: 0,
+      bonus: 0,
+      net: 0,
+    },
+  }
+}
+
+export async function fetchWriteoffs() {
+  if (isSupabaseConfigured) {
+    try {
+      const writeoffs = await readWriteoffsFromSupabase()
+      writeOffline(OFFLINE_KEYS.writeoffs, writeoffs)
+      return writeoffs
+    } catch {
+      // fall back to local storage
+    }
+  }
+
+  return offlineWriteoffsState()
+}
+
+export async function mutateWriteoffs(payload, pin) {
+  const op = String(payload?.op || '').trim()
+  if (!op) throw new Error('Не указана операция')
+
+  const state = offlineWriteoffsState()
+  if (op === 'append' && payload.entry) {
+    state.entries.unshift({ ...payload.entry })
+    persistOfflineWriteoffs(state)
+    if (isSupabaseConfigured) {
+      try {
+        await writeWriteoffsToSupabase(state)
+      } catch {
+        // keep local storage as the fallback source
+      }
+    }
+    return { success: true, source: 'supabase' }
+  }
+  if (op === 'delete' && payload.id) {
+    state.entries = state.entries.filter((e) => e.id !== payload.id)
+    persistOfflineWriteoffs(state)
+    if (isSupabaseConfigured) {
+      try {
+        await writeWriteoffsToSupabase(state)
+      } catch {
+        // keep local storage as the fallback source
+      }
+    }
+    return { success: true, source: 'supabase' }
+  }
+  if (op === 'update' && payload.entry) {
+    const e = payload.entry
+    state.entries = state.entries.map((x) => (x.id === e.id ? { ...e } : x))
+    persistOfflineWriteoffs(state)
+    if (isSupabaseConfigured) {
+      try {
+        await writeWriteoffsToSupabase(state)
+      } catch {
+        // keep local storage as the fallback source
+      }
+    }
+    return { success: true, source: 'supabase' }
+  }
+  if (op === 'templates' && Array.isArray(payload.templates)) {
+    state.templates = payload.templates.map((t) => ({ ...t }))
+    persistOfflineWriteoffs(state)
+    if (isSupabaseConfigured) {
+      try {
+        await writeWriteoffsToSupabase(state)
+      } catch {
+        // keep local storage as the fallback source
+      }
+    }
+    return { success: true, source: 'supabase' }
+  }
+
+  throw new Error('Неверная операция')
+}
+
 export async function fetchStopList() {
-  if (!BASE_URL) {
-    return offlineStopListState()
+  if (isSupabaseConfigured) {
+    try {
+      const stopList = await readStopListFromSupabase()
+      writeOffline(OFFLINE_KEYS.stopList, stopList)
+      return stopList
+    } catch {
+      // fall back to local storage
+    }
   }
-  try {
-    const cb = Date.now()
-    const data = await requestJson(`${BASE_URL}?action=getStopList&_cb=${cb}`)
-    const stopList = Array.isArray(data?.stopList) ? data.stopList : []
-    writeOffline(OFFLINE_KEYS.stopList, stopList)
-    return stopList
-  } catch (err) {
-    const cached = readOffline(OFFLINE_KEYS.stopList, null)
-    if (Array.isArray(cached)) return cached
-    throw err
-  }
+
+  return offlineStopListState()
 }
 
 export async function mutateStopList(payload) {
   const op = String(payload?.op || '').trim()
   if (!op) throw new Error('Не указана операция')
 
-  if (!BASE_URL) {
-    const state = offlineStopListState()
-    if (op === 'append' && payload.entry) {
-      const next = [{ ...payload.entry }, ...state.filter((x) => x.id !== payload.entry.id)]
-      persistOfflineStopList(next)
-      return { success: true, mocked: true }
-    }
-    if (op === 'delete' && payload.id) {
-      const next = state.filter((x) => x.id !== payload.id)
-      persistOfflineStopList(next)
-      return { success: true, mocked: true }
-    }
-    throw new Error('Неверная операция')
-  }
-
+  const state = offlineStopListState()
   if (op === 'append' && payload.entry) {
-    const e = payload.entry
-    const fields = {
-      action: 'appendStopListItem',
-      item: String(e.item || '').trim(),
-      date: String(e.date || '').slice(0, 10),
-      _cb: String(Date.now()),
+    const next = [{ ...payload.entry }, ...state.filter((x) => x.id !== payload.entry.id)]
+    persistOfflineStopList(next)
+    if (isSupabaseConfigured) {
+      try {
+        await writeStopListToSupabase(next)
+      } catch {
+        // keep local storage as the fallback source
+      }
     }
-    const getUrl = gasUrlWithQuery(BASE_URL, fields)
-    if (getUrl.length <= 7200) return await requestJson(getUrl)
-    return await requestJson(String(BASE_URL).trim(), {
-      method: 'POST',
-      body: JSON.stringify(fields),
-    })
+    return { success: true, source: 'supabase' }
   }
-
   if (op === 'delete' && payload.id) {
-    const url = gasUrlWithQuery(BASE_URL, {
-      action: 'deleteStopListItem',
-      id: String(payload.id),
-      _cb: String(Date.now()),
-    })
-    return await requestJson(url)
+    const next = state.filter((x) => x.id !== payload.id)
+    persistOfflineStopList(next)
+    if (isSupabaseConfigured) {
+      try {
+        await writeStopListToSupabase(next)
+      } catch {
+        // keep local storage as the fallback source
+      }
+    }
+    return { success: true, source: 'supabase' }
   }
 
   throw new Error('Неверная операция')

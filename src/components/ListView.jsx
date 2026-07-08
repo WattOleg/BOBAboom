@@ -180,8 +180,13 @@ function ListView({
         <header className="list-header">
           <div className="title-menu-wrap">
             <div className="title-menu-btn">
-              <img src="/e-Bar.png" alt="e-Bar Cafe De Ghouli" className="title-logo" />
-              <h1>{activeSectionLabel}</h1>
+              <div className="title-logo title-logo-badge" aria-hidden>
+                BB
+              </div>
+              <div>
+                <div className="title-brand">BOBA BOOM</div>
+                <h1>{activeSectionLabel}</h1>
+              </div>
             </div>
           </div>
           <div className="list-header-badges">
