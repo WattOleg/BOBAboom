@@ -70,30 +70,10 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB' }) {
           const { data, error } = await supabase.auth.signUp({ email: normalizedEmail, password: normalizedPassword })
           if (error) throw error
           if (data?.user) {
-            const userId = data.user.id
-            await supabase.from('app_data').insert({
-              key: `profile:${userId}`,
-              value: { email: normalizedEmail, createdAt: new Date().toISOString() },
-            })
-            // Try to sign in immediately after sign up to create a session when possible
-            try {
-              const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password: normalizedPassword })
-              if (signInError) {
-                // If immediate sign-in fails (email confirmation required), inform the user
-                setSuccess('Пользователь создан. Подтвердите email, затем войдите с паролем. Если подтверждение не пришло — запросите сброс пароля.')
-                setMode('signIn')
-              } else if (signInData?.session?.user) {
-                onSuccess({ id: signInData.session.user.id, email: signInData.session.user.email || null, phone: signInData.session.user.phone || null })
-              } else {
-                setSuccess('Пользователь зарегистрирован. Войдите с помощью email и пароля.')
-                setMode('signIn')
-              }
-            } catch (e) {
-              setSuccess('Пользователь создан. Войдите с помощью email и пароля.')
-              setMode('signIn')
-            }
+            onSuccess({ id: data.user.id, email: data.user.email || null, phone: data.user.phone || null })
           } else {
-            setSuccess('Пользователь зарегистрирован. Проверьте почту для подтверждения.')
+            setSuccess('Пользователь зарегистрирован. Войдите с помощью email и пароля.')
+            setMode('signIn')
           }
         }
       } catch (err) {

@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import supabase, { getSession, initAuth } from './api/supabaseClient'
 import ListView from './components/ListView'
 import DetailView from './components/DetailView'
 import EditOverlay from './components/EditOverlay'
-import AuthGate from './components/AuthGate'
 import { useCards } from './hooks/useCards'
 import {
   createCard,
@@ -152,9 +150,6 @@ function App() {
   const [view, setView] = useState('list')
   const [selectedId, setSelectedId] = useState(null)
   const [editOpen, setEditOpen] = useState(false)
-  const [authUser, setAuthUser] = useState(null)
-  const [authModalOpen, setAuthModalOpen] = useState(false)
-  const [pendingAction, setPendingAction] = useState(null)
   const [draftCard, setDraftCard] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [activeSection, setActiveSection] = useState('techcards')
@@ -289,35 +284,6 @@ function App() {
     return () => window.removeEventListener(VISIT_EVENT, onVisit)
   }, [])
 
-  useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      try {
-        await initAuth()
-        const session = await getSession()
-        if (!mounted) return
-        if (session && session.user) {
-          setAuthUser({ id: session.user.id, email: session.user.email || null, phone: session.user.phone || null })
-        }
-      } catch {
-        // ignore
-      }
-    })()
-
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session && session.user) {
-        setAuthUser({ id: session.user.id, email: session.user.email || null, phone: session.user.phone || null })
-      } else {
-        setAuthUser(null)
-      }
-    })
-
-    return () => {
-      mounted = false
-      if (listener && typeof listener.unsubscribe === 'function') listener.unsubscribe()
-    }
-  }, [])
-
   const ensureFullCard = async (card) => {
     if (!card || !card.isPartial) return card
     const detailed = await fetchCardDetail(card.sheetName)
@@ -368,20 +334,10 @@ function App() {
   }
 
   const requestAction = (action) => {
-    if (!authUser) {
-      setPendingAction(action)
-      setAuthModalOpen(true)
-      return
-    }
     void performAction(action)
   }
 
   const requestSectionEdit = (sectionId) => {
-    if (!authUser) {
-      setPendingAction({ type: 'editSection', sectionId })
-      setAuthModalOpen(true)
-      return
-    }
     const current = sectionId ? sectionContent[sectionId] : null
     if (sectionId && current) {
       setSectionEditor({
@@ -394,27 +350,7 @@ function App() {
   }
 
   const requestScheduleUnlock = () => {
-    if (!authUser) {
-      setPendingAction({ type: 'scheduleUnlock' })
-      setAuthModalOpen(true)
-      return
-    }
     setScheduleUnlocked(true)
-  }
-
-  const closeAuthModal = () => {
-    setAuthModalOpen(false)
-    setPendingAction(null)
-  }
-
-  const handleAuthSuccess = (user) => {
-    setAuthUser(user)
-    setAuthModalOpen(false)
-    if (pendingAction) {
-      const action = pendingAction
-      setPendingAction(null)
-      void performAction(action)
-    }
   }
 
   const performAction = async (action) => {
@@ -731,8 +667,6 @@ function App() {
         }}
         onSave={onSaveEdit}
       />
-
-      <AuthGate isOpen={authModalOpen} title="Доступ в BB" onClose={closeAuthModal} onSuccess={handleAuthSuccess} />
 
       {sectionEditor.open ? (
         <div className="export-modal-backdrop" onClick={() => setSectionEditor({ open: false, sectionId: null, text: '' })}>
