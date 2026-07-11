@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getPhotoCandidates } from '../utils/photoUrl'
 
-function DetailView({ card, loading, onBack, onEdit, onDelete, onExport, onShare }) {
+function DetailView({ card, loading, onBack, onEdit, onDelete, onDuplicate, onExport, onShare }) {
   const touchRef = useRef({ x: 0, y: 0, active: false })
   const photoCandidates = useMemo(() => getPhotoCandidates(card?.photoUrl), [card?.photoUrl])
   const [photoIdx, setPhotoIdx] = useState(0)
+  const [ingredientsExpanded, setIngredientsExpanded] = useState(false)
 
   useEffect(() => {
     setPhotoIdx(0)
@@ -34,8 +35,8 @@ function DetailView({ card, loading, onBack, onEdit, onDelete, onExport, onShare
     const dy = y - state.y
     const mostlyHorizontal = Math.abs(dx) > Math.abs(dy) * 1.2
 
-    // Swipe left: close card and return to list.
-    if (mostlyHorizontal && dx < -52) onBack()
+    // Swipe right: close card and return to list.
+    if (mostlyHorizontal && dx > 52) onBack()
   }
 
   const onTouchStart = (e) => {
@@ -116,7 +117,12 @@ function DetailView({ card, loading, onBack, onEdit, onDelete, onExport, onShare
       </section>
 
       <section className={`block detail-block ${loading ? 'is-loading' : 'is-ready'}`}>
-        <h3>Ингредиенты</h3>
+        <div className="detail-section-head">
+          <h3>Ингредиенты</h3>
+          <button type="button" className="detail-section-action" onClick={() => setIngredientsExpanded(true)}>
+            На весь экран
+          </button>
+        </div>
         {loading ? <p className="muted">Загружаю детали...</p> : null}
         <div className="ingredient-list">
           {card.ingredients?.map((ing, idx) => (
@@ -133,9 +139,37 @@ function DetailView({ card, loading, onBack, onEdit, onDelete, onExport, onShare
         <p>{card.technology}</p>
       </section>
 
+      {ingredientsExpanded ? (
+        <div className="ingredients-fullscreen" role="dialog" aria-modal="true" onClick={() => setIngredientsExpanded(false)}>
+          <div className="ingredients-fullscreen-card" onClick={(event) => event.stopPropagation()}>
+            <div className="detail-section-head">
+              <h3>{card.name}</h3>
+              <button type="button" className="detail-section-action" onClick={() => setIngredientsExpanded(false)}>
+                Закрыть
+              </button>
+            </div>
+            <div className="ingredients-fullscreen-list">
+              {(card.ingredients || []).length ? (
+                card.ingredients.map((ing, idx) => (
+                  <div key={`${ing.name}-${idx}`} className="ingredients-fullscreen-row">
+                    <span>{ing.name}</span>
+                    <strong>{ing.amount}</strong>
+                  </div>
+                ))
+              ) : (
+                <p className="muted">Список ингредиентов пуст.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="actions">
         <button type="button" className="btn btn-dark" onClick={onEdit}>
           Редактировать
+        </button>
+        <button type="button" className="btn btn-outline-black" onClick={onDuplicate}>
+          Дублировать
         </button>
         <div className="actions-inline">
           <button type="button" className="btn btn-compact btn-outline-black" onClick={onExport}>

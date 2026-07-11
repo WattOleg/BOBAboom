@@ -12,7 +12,6 @@ import {
   parseHexColor,
   rateForDate,
   shiftHours,
-  shortageDeductionsEqualCents,
   timeToMinutes,
   weekdayShortRu,
 } from '../utils/scheduleMath'
@@ -234,8 +233,20 @@ function ScheduleView({
 
   const shortageMap = data.shortageByMonth || {}
   const hasShortageKey = Object.prototype.hasOwnProperty.call(shortageMap, monthKey)
-  const shortageAmount = tenge(Math.max(0, Number(shortageMap[monthKey]) || 0))
-  const shortageCents = shortageAmount * 100
+  const rawMonthShortage = shortageMap[monthKey]
+  const monthShortageEntries = useMemo(() => {
+    if (rawMonthShortage && typeof rawMonthShortage === 'object' && !Array.isArray(rawMonthShortage)) {
+      return Object.fromEntries(
+        Object.entries(rawMonthShortage).map(([employeeId, value]) => [employeeId, tenge(Math.max(0, Number(value) || 0))]),
+      )
+    }
+
+    const fallbackTotal = tenge(Math.max(0, Number(rawMonthShortage) || 0))
+    const employees = monthEmployees || []
+    if (!employees.length) return {}
+    const perEmployee = fallbackTotal / employees.length
+    return Object.fromEntries(employees.map((employee) => [employee.id, tenge(perEmployee)]))
+  }, [monthEmployees, rawMonthShortage])
   const bonusesByMonth = data.bonusesByMonth || {}
   const monthBonuses =
     bonusesByMonth[monthKey] && typeof bonusesByMonth[monthKey] === 'object' && !Array.isArray(bonusesByMonth[monthKey])
@@ -244,16 +255,11 @@ function ScheduleView({
 
   const { employeePayouts, netPay } = useMemo(() => {
     const emps = monthEmployees || []
-    const grossCents = emps.map((e) => {
-      const t = totals[e.id] || { hours: 0, pay: 0 }
-      return tenge(t.pay || 0) * 100
-    })
-    const dedCents = shortageDeductionsEqualCents(emps.length, shortageCents)
     let totalNetTenge = 0
-    const rows = emps.map((e, i) => {
+    const rows = emps.map((e) => {
       const t = totals[e.id] || { hours: 0, pay: 0 }
-      const gC = grossCents[i] || 0
-      const dC = dedCents[i] || 0
+      const gC = tenge(t.pay || 0) * 100
+      const dC = Math.max(0, tenge(monthShortageEntries[e.id] || 0)) * 100
       const bonus = tenge(Number(monthBonuses[e.id]) || 0)
       const nC = Math.max(0, gC - dC + bonus * 100)
       const netTenge = Math.round(nC / 100)
@@ -268,7 +274,7 @@ function ScheduleView({
       }
     })
     return { employeePayouts: rows, netPay: totalNetTenge }
-  }, [monthEmployees, totals, shortageCents, monthBonuses])
+  }, [monthEmployees, totals, monthShortageEntries, monthBonuses])
   const payoutById = useMemo(
     () => new Map(employeePayouts.map((row) => [row.id, row])),
     [employeePayouts],
@@ -340,15 +346,29 @@ function ScheduleView({
     return { hours, gross: null, net: null, hourlyRate: null, locked: true }
   }
 
-  const setShortageForMonth = (raw) => {
+  const setShortageForEmployeeMonth = (employeeId, raw) => {
     const sm = { ...shortageMap }
+    const currentMonthShortage = sm[monthKey]
+    const currentEntries =
+      currentMonthShortage && typeof currentMonthShortage === 'object' && !Array.isArray(currentMonthShortage)
+        ? { ...currentMonthShortage }
+        : Object.fromEntries(
+            (monthEmployees || []).map((employee) => [employee.id, tenge(Math.max(0, Number(currentMonthShortage) || 0) / Math.max(1, (monthEmployees || []).length))]),
+          )
+
     if (raw === '' || raw === null) {
-      delete sm[monthKey]
+      delete currentEntries[employeeId]
+      if (Object.keys(currentEntries).length === 0) {
+        delete sm[monthKey]
+      } else {
+        sm[monthKey] = currentEntries
+      }
       onChange({ ...data, shortageByMonth: sm })
       return
     }
-    const v = tenge(Math.max(0, Number(raw) || 0))
-    sm[monthKey] = v
+
+    currentEntries[employeeId] = tenge(Math.max(0, Number(raw) || 0))
+    sm[monthKey] = currentEntries
     onChange({ ...data, shortageByMonth: sm })
   }
 
@@ -644,7 +664,7 @@ function ScheduleView({
             rows: summaryRows,
             totalHours: grandTotal.hours,
             totalGross: tenge(grandTotal.pay),
-            shortage: hasShortageKey ? tenge(shortageAmount) : 0,
+            shortage: employeePayouts.reduce((sum, row) => sum + (row.deduction || 0), 0),
             netPay: tenge(netPay),
           }
         : null,
@@ -659,7 +679,6 @@ function ScheduleView({
     monthLabel,
     monthKey,
     hasShortageKey,
-    shortageAmount,
     netPay,
     canEdit,
   ])
@@ -1165,23 +1184,26 @@ function ScheduleView({
           <strong>{tenge(grandTotal.pay)} ₸</strong>
         </div>
         <div className="schedule-shortage-block">
-          <label className="schedule-shortage-label">
-            Недостача за месяц
-            <input
-              type="number"
-              min={0}
-              step={100}
-              className="schedule-shortage-input"
-              value={hasShortageKey ? shortageAmount : ''}
-              onChange={(e) => setShortageForMonth(e.target.value)}
-              disabled={!canEdit}
-              placeholder="0"
-            />
-            <span className="schedule-currency-suffix">₸</span>
-          </label>
-          <p className="muted small">
-            Делится <strong>поровну</strong> между всеми сотрудниками в списке и вычитается в колонке «К выплате».
-          </p>
+          <h5 className="schedule-bonus-title">Недостача за месяц</h5>
+          <div className="schedule-bonus-grid">
+            {(monthEmployees || []).map((e) => (
+              <label key={e.id} className="schedule-bonus-row">
+                <span className="schedule-bonus-name">{e.name}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  className="schedule-shortage-input"
+                  value={monthShortageEntries[e.id] ?? ''}
+                  onChange={(ev) => setShortageForEmployeeMonth(e.id, ev.target.value)}
+                  disabled={!canEdit}
+                  placeholder="0"
+                />
+                <span className="schedule-currency-suffix">₸</span>
+              </label>
+            ))}
+          </div>
+          <p className="muted small">Недостача указывается индивидуально для каждого сотрудника и вычитается из его выплаты.</p>
         </div>
         <div className="schedule-shortage-block">
           <h5 className="schedule-bonus-title">Бонус за месяц</h5>

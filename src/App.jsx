@@ -307,6 +307,25 @@ function App() {
     await exportCardToPdf(fullCard)
   }
 
+  const duplicateSelectedCard = () => {
+    if (!selectedCard) return
+    const today = new Date().toISOString().slice(0, 10)
+    const duplicate = {
+      ...selectedCard,
+      sheetName: '',
+      name: selectedCard.name ? `${selectedCard.name} (копия)` : '',
+      nameRu: selectedCard.nameRu ? `${selectedCard.nameRu} (копия)` : '',
+      author: '',
+      date: today,
+      ingredients: Array.isArray(selectedCard.ingredients)
+        ? selectedCard.ingredients.map((ingredient) => ({ ...ingredient }))
+        : [{ name: '', amount: '' }],
+    }
+    delete duplicate.isPartial
+    setDraftCard(duplicate)
+    setEditOpen(true)
+  }
+
   const shareOneCard = async () => {
     if (!selectedCard) return
     const fullCard = await ensureFullCard(selectedCard)
@@ -651,6 +670,7 @@ function App() {
             onBack={closeDetail}
             onEdit={() => requestAction('edit')}
             onDelete={() => requestAction('delete')}
+            onDuplicate={duplicateSelectedCard}
             onExport={exportOneCard}
             onShare={shareOneCard}
           />
