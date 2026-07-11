@@ -142,8 +142,11 @@ function DetailView({ card, loading, onBack, onEdit, onDelete, onDuplicate, onEx
       {ingredientsExpanded ? (
         <div className="ingredients-fullscreen" role="dialog" aria-modal="true" onClick={() => setIngredientsExpanded(false)}>
           <div className="ingredients-fullscreen-card" onClick={(event) => event.stopPropagation()}>
-            <div className="detail-section-head">
-              <h3>{card.name}</h3>
+            <div className="detail-section-head ingredients-fullscreen-head">
+              <div>
+                <h3>{card.name}</h3>
+                <p className="muted small">Список ингредиентов</p>
+              </div>
               <button type="button" className="detail-section-action" onClick={() => setIngredientsExpanded(false)}>
                 Закрыть
               </button>

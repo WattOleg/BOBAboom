@@ -826,8 +826,8 @@ h1 {
 }
 
 .ingredients-fullscreen-card {
-  width: min(720px, 100%);
-  max-height: min(90vh, 900px);
+  width: min(860px, 100%);
+  max-height: min(92vh, 960px);
   overflow: auto;
   background: #fff;
   border-radius: 24px;
@@ -835,18 +835,60 @@ h1 {
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
 }
 
+.ingredients-fullscreen-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ececec;
+}
+
 .ingredients-fullscreen-list {
   display: grid;
   gap: 10px;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .ingredients-fullscreen-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
   border-bottom: 1px solid #ececec;
+}
+
+.ingredients-fullscreen-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.ingredients-fullscreen-row strong {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .ingredients-fullscreen-card {
+    padding: 14px;
+    border-radius: 18px;
+  }
+
+  .ingredients-fullscreen-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .ingredients-fullscreen-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .ingredients-fullscreen-row strong {
+    justify-self: start;
+  }
 }
 
 .actions {

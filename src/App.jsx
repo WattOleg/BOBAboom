@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import ListView from './components/ListView'
 import DetailView from './components/DetailView'
 import EditOverlay from './components/EditOverlay'
+import PinModal from './components/PinModal'
 import { useCards } from './hooks/useCards'
 import {
   createCard,
@@ -161,6 +162,8 @@ function App() {
   const [scheduleUnlocked, setScheduleUnlocked] = useState(false)
   const [scheduleSaving, setScheduleSaving] = useState(false)
   const [scheduleSaveError, setScheduleSaveError] = useState('')
+  const [adminPinOpen, setAdminPinOpen] = useState(false)
+  const [pendingEditAction, setPendingEditAction] = useState(null)
   const [scheduleLoadError, setScheduleLoadError] = useState('')
   const [scheduleLoading, setScheduleLoading] = useState(false)
   const [scheduleBaseline, setScheduleBaseline] = useState('')
@@ -353,6 +356,11 @@ function App() {
   }
 
   const requestAction = (action) => {
+    if (action === 'edit') {
+      setPendingEditAction(action)
+      setAdminPinOpen(true)
+      return
+    }
     void performAction(action)
   }
 
@@ -370,6 +378,15 @@ function App() {
 
   const requestScheduleUnlock = () => {
     setScheduleUnlocked(true)
+  }
+
+  const handleAdminPinSuccess = () => {
+    setAdminPinOpen(false)
+    if (pendingEditAction) {
+      const action = pendingEditAction
+      setPendingEditAction(null)
+      void performAction(action)
+    }
   }
 
   const performAction = async (action) => {
@@ -686,6 +703,16 @@ function App() {
           setDraftCard(null)
         }}
         onSave={onSaveEdit}
+      />
+
+      <PinModal
+        isOpen={adminPinOpen}
+        title="Введите PIN администратора"
+        onSuccess={handleAdminPinSuccess}
+        onClose={() => {
+          setAdminPinOpen(false)
+          setPendingEditAction(null)
+        }}
       />
 
       {sectionEditor.open ? (
