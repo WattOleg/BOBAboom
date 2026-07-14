@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import ListView from './components/ListView'
 import DetailView from './components/DetailView'
 import EditOverlay from './components/EditOverlay'
@@ -149,6 +149,8 @@ function App() {
   const { cards, loading, error, refresh, addLocalCard, updateLocalCard, removeLocalCard } = useCards()
   const [visitCount, setVisitCount] = useState(null)
   const [view, setView] = useState('list')
+  const [detailSwipeX, setDetailSwipeX] = useState(0)
+  const [detailSwipeAnimating, setDetailSwipeAnimating] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
   const [editOpen, setEditOpen] = useState(false)
   const [draftCard, setDraftCard] = useState(null)
@@ -336,6 +338,8 @@ function App() {
   }
 
   const openDetail = async (cardId) => {
+    setDetailSwipeX(0)
+    setDetailSwipeAnimating(false)
     setSelectedId(cardId)
     setView('detail')
     const base = cards.find((card) => card.sheetName === cardId)
@@ -351,9 +355,16 @@ function App() {
   }
 
   const closeDetail = () => {
+    setDetailSwipeX(0)
+    setDetailSwipeAnimating(false)
     setView('list')
     setEditOpen(false)
   }
+
+  const handleDetailSwipeMove = useCallback((offsetX, animate) => {
+    setDetailSwipeAnimating(Boolean(animate))
+    setDetailSwipeX(Math.max(0, offsetX))
+  }, [])
 
   const requestAction = (action) => {
     if (action === 'edit') {
@@ -595,7 +606,14 @@ function App() {
 
   return (
     <div className="app-shell">
-      <div className={`screen-stack view-${view}`}>
+      <div
+        className={`screen-stack view-${view}${detailSwipeAnimating ? ' is-swipe-animating' : ''}${view === 'detail' && detailSwipeX > 0 && !detailSwipeAnimating ? ' is-swipe-dragging' : ''}`}
+        style={
+          view === 'detail' && detailSwipeX > 0
+            ? { transform: `translateX(calc(-50% + ${detailSwipeX}px))` }
+            : undefined
+        }
+      >
         <section className="screen screen-list" aria-hidden={view !== 'list'}>
           <ListView
             cards={cards}
@@ -685,6 +703,8 @@ function App() {
             card={selectedCard}
             loading={detailLoading}
             onBack={closeDetail}
+            onSwipeMove={handleDetailSwipeMove}
+            swipeEnabled={!editOpen && !adminPinOpen}
             onEdit={() => requestAction('edit')}
             onDelete={() => requestAction('delete')}
             onDuplicate={duplicateSelectedCard}

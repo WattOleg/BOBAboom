@@ -1,8 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getPhotoCandidates } from '../utils/photoUrl'
 
-function DetailView({ card, loading, onBack, onEdit, onDelete, onDuplicate, onExport, onShare }) {
-  const touchRef = useRef({ x: 0, y: 0, active: false })
+const SWIPE_START_THRESHOLD = 10
+const SWIPE_COMMIT_RATIO = 0.22
+const SWIPE_COMMIT_MIN = 72
+const SWIPE_COMMIT_MAX = 140
+
+function DetailView({ card, loading, onBack, onEdit, onDelete, onDuplicate, onExport, onShare, onSwipeMove, swipeEnabled = true }) {
+  const rootRef = useRef(null)
+  const swipeRef = useRef({ startX: 0, startY: 0, active: false, dragging: false })
   const photoCandidates = useMemo(() => getPhotoCandidates(card?.photoUrl), [card?.photoUrl])
   const [photoIdx, setPhotoIdx] = useState(0)
   const [ingredientsExpanded, setIngredientsExpanded] = useState(false)
@@ -10,6 +16,93 @@ function DetailView({ card, loading, onBack, onEdit, onDelete, onDuplicate, onEx
   useEffect(() => {
     setPhotoIdx(0)
   }, [card?.photoUrl])
+
+  useEffect(() => {
+    if (ingredientsExpanded) {
+      onSwipeMove?.(0, false)
+    }
+  }, [ingredientsExpanded, onSwipeMove])
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root || !swipeEnabled) return undefined
+
+    const resetSwipe = () => {
+      swipeRef.current = { startX: 0, startY: 0, active: false, dragging: false }
+      onSwipeMove?.(0, true)
+    }
+
+    const onTouchStart = (event) => {
+      if (ingredientsExpanded) return
+      const touch = event.changedTouches?.[0]
+      if (!touch) return
+      swipeRef.current = {
+        startX: touch.clientX,
+        startY: touch.clientY,
+        active: true,
+        dragging: false,
+      }
+    }
+
+    const onTouchMove = (event) => {
+      if (ingredientsExpanded || !swipeRef.current.active) return
+      const touch = event.changedTouches?.[0]
+      if (!touch) return
+
+      const dx = touch.clientX - swipeRef.current.startX
+      const dy = touch.clientY - swipeRef.current.startY
+
+      if (!swipeRef.current.dragging) {
+        if (Math.abs(dx) < SWIPE_START_THRESHOLD && Math.abs(dy) < SWIPE_START_THRESHOLD) return
+        if (Math.abs(dx) <= Math.abs(dy) * 1.15) {
+          swipeRef.current.active = false
+          return
+        }
+        swipeRef.current.dragging = true
+      }
+
+      if (dx > 0) {
+        event.preventDefault()
+        onSwipeMove?.(dx, false)
+      }
+    }
+
+    const onTouchEnd = (event) => {
+      if (!swipeRef.current.active && !swipeRef.current.dragging) return
+      const touch = event.changedTouches?.[0]
+      if (!touch) {
+        resetSwipe()
+        return
+      }
+
+      const dx = touch.clientX - swipeRef.current.startX
+      const commitThreshold = Math.min(
+        SWIPE_COMMIT_MAX,
+        Math.max(SWIPE_COMMIT_MIN, window.innerWidth * SWIPE_COMMIT_RATIO),
+      )
+
+      if (swipeRef.current.dragging && dx >= commitThreshold) {
+        onSwipeMove?.(0, true)
+        onBack()
+      } else {
+        resetSwipe()
+      }
+
+      swipeRef.current = { startX: 0, startY: 0, active: false, dragging: false }
+    }
+
+    root.addEventListener('touchstart', onTouchStart, { passive: true })
+    root.addEventListener('touchmove', onTouchMove, { passive: false })
+    root.addEventListener('touchend', onTouchEnd, { passive: true })
+    root.addEventListener('touchcancel', onTouchEnd, { passive: true })
+
+    return () => {
+      root.removeEventListener('touchstart', onTouchStart)
+      root.removeEventListener('touchmove', onTouchMove)
+      root.removeEventListener('touchend', onTouchEnd)
+      root.removeEventListener('touchcancel', onTouchEnd)
+    }
+  }, [ingredientsExpanded, onBack, onSwipeMove, swipeEnabled])
 
   if (!card) {
     return (
@@ -22,53 +115,8 @@ function DetailView({ card, loading, onBack, onEdit, onDelete, onDuplicate, onEx
   const hasCandidate = photoIdx < photoCandidates.length
   const photoUrl = hasCandidate ? photoCandidates[photoIdx] : ''
 
-  const startSwipe = (x, y) => {
-    touchRef.current = { x, y, active: true }
-  }
-
-  const finishSwipe = (x, y) => {
-    const state = touchRef.current
-    touchRef.current.active = false
-    if (!state.active) return
-
-    const dx = x - state.x
-    const dy = y - state.y
-    const mostlyHorizontal = Math.abs(dx) > Math.abs(dy) * 1.2
-
-    // Swipe right: close card and return to list.
-    if (mostlyHorizontal && dx > 52) onBack()
-  }
-
-  const onTouchStart = (e) => {
-    const t = e.changedTouches?.[0]
-    if (!t) return
-    startSwipe(t.clientX, t.clientY)
-  }
-
-  const onTouchEnd = (e) => {
-    const t = e.changedTouches?.[0]
-    if (!t) return
-    finishSwipe(t.clientX, t.clientY)
-  }
-
-  const onPointerDown = (e) => {
-    if (e.pointerType !== 'touch') return
-    startSwipe(e.clientX, e.clientY)
-  }
-
-  const onPointerUp = (e) => {
-    if (e.pointerType !== 'touch') return
-    finishSwipe(e.clientX, e.clientY)
-  }
-
   return (
-    <div
-      className="view detail-view"
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
-      onPointerDown={onPointerDown}
-      onPointerUp={onPointerUp}
-    >
+    <div ref={rootRef} className="view detail-view">
       <div className="hero">
         {photoUrl ? (
           <img
@@ -91,6 +139,8 @@ function DetailView({ card, loading, onBack, onEdit, onDelete, onDuplicate, onEx
           </button>
         </div>
       </div>
+
+      <p className="detail-swipe-hint muted">Свайп вправо — назад к списку</p>
 
       <h2 className="title">{card.name}</h2>
       <p className="subtitle">{card.nameRu}</p>
@@ -143,7 +193,7 @@ function DetailView({ card, loading, onBack, onEdit, onDelete, onDuplicate, onEx
         <div className="ingredients-fullscreen" role="dialog" aria-modal="true" onClick={() => setIngredientsExpanded(false)}>
           <div className="ingredients-fullscreen-card" onClick={(event) => event.stopPropagation()}>
             <div className="detail-section-head ingredients-fullscreen-head">
-              <div>
+              <div className="ingredients-fullscreen-title">
                 <h3>{card.name}</h3>
                 <p className="muted small">Список ингредиентов</p>
               </div>
@@ -155,8 +205,8 @@ function DetailView({ card, loading, onBack, onEdit, onDelete, onDuplicate, onEx
               {(card.ingredients || []).length ? (
                 card.ingredients.map((ing, idx) => (
                   <div key={`${ing.name}-${idx}`} className="ingredients-fullscreen-row">
-                    <span>{ing.name}</span>
-                    <strong>{ing.amount}</strong>
+                    <span className="ingredients-fullscreen-name">{ing.name}</span>
+                    <strong className="ingredients-fullscreen-amount">{ing.amount}</strong>
                   </div>
                 ))
               ) : (

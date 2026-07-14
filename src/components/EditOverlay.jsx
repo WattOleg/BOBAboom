@@ -10,7 +10,8 @@ function EditOverlay({ isOpen, card, categories, onClose, onSave }) {
   const [photoUploading, setPhotoUploading] = useState(false)
   const [photoUploadError, setPhotoUploadError] = useState('')
   const [photoPreviewBroken, setPhotoPreviewBroken] = useState(false)
-  const fileInputRef = useRef(null)
+  const galleryInputRef = useRef(null)
+  const cameraInputRef = useRef(null)
 
   useEffect(() => {
     if (card) setForm(card)
@@ -153,7 +154,14 @@ function EditOverlay({ isOpen, card, categories, onClose, onSave }) {
             />
             <div className="photo-field-actions">
               <input
-                ref={fileInputRef}
+                ref={galleryInputRef}
+                type="file"
+                accept="image/*"
+                className="photo-file-input"
+                onChange={handlePhotoAttach}
+              />
+              <input
+                ref={cameraInputRef}
                 type="file"
                 accept="image/*"
                 capture="environment"
@@ -164,9 +172,17 @@ function EditOverlay({ isOpen, card, categories, onClose, onSave }) {
                 type="button"
                 className="ghost-btn photo-attach-btn"
                 disabled={photoUploading}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => galleryInputRef.current?.click()}
               >
-                {photoUploading ? 'Загрузка…' : 'Прикрепить с устройства'}
+                {photoUploading ? 'Загрузка…' : 'Из галереи'}
+              </button>
+              <button
+                type="button"
+                className="ghost-btn photo-attach-btn"
+                disabled={photoUploading}
+                onClick={() => cameraInputRef.current?.click()}
+              >
+                Камера
               </button>
               {form.photoUrl ? (
                 <button type="button" className="ghost-btn photo-clear-btn" disabled={photoUploading} onClick={clearPhoto}>
