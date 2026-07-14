@@ -455,7 +455,7 @@ function ListView({
           className={`bottom-tab ${activeMainSection === 'techcards' ? 'is-active' : ''}`}
           onClick={() => onSectionChange('techcards')}
         >
-          ТехКарты
+          Карточки
         </button>
         <button
           type="button"

@@ -5,10 +5,11 @@ import {
   readStopListFromSupabase,
   readTechcardsFromSupabase,
   readWriteoffsFromSupabase,
+  upsertTechcardInSupabase,
+  deleteTechcardFromSupabase,
   writeSectionsToSupabase,
   writeScheduleToSupabase,
   writeStopListToSupabase,
-  writeTechcardsToSupabase,
   writeWriteoffsToSupabase,
 } from './supabaseDb.js'
 
@@ -267,11 +268,7 @@ export async function updateCard(sheetName, cardData, pin) {
   writeOffline(OFFLINE_KEYS.cardsList, nextCards)
 
   if (isSupabaseConfigured) {
-    try {
-      await writeTechcardsToSupabase(nextCards)
-    } catch {
-      // keep local storage as the fallback source
-    }
+    await upsertTechcardInSupabase(normalizedCard)
   }
 
   return { success: true, source: 'supabase', sheetName, cardData: normalizedCard, pin }
@@ -286,11 +283,7 @@ export async function createCard(cardData, pin) {
   writeOffline(OFFLINE_KEYS.cardsList, nextCards)
 
   if (isSupabaseConfigured) {
-    try {
-      await writeTechcardsToSupabase(nextCards)
-    } catch {
-      // keep local storage as the fallback source
-    }
+    await upsertTechcardInSupabase(normalizedCard)
   }
 
   return { success: true, source: 'supabase', cardData: normalizedCard, pin }
@@ -303,11 +296,7 @@ export async function deleteCard(sheetName, pin) {
   writeOffline(OFFLINE_KEYS.cardsList, existing)
 
   if (isSupabaseConfigured) {
-    try {
-      await writeTechcardsToSupabase(existing)
-    } catch {
-      // keep local storage as the fallback source
-    }
+    await deleteTechcardFromSupabase(sheetName)
   }
 
   return { success: true, source: 'supabase', sheetName, pin }

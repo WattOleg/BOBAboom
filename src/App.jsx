@@ -44,8 +44,8 @@ function makeEmptyCard() {
 
 const CATEGORY_PRIORITY = ['Кофе', 'Матча', 'Чай листовой', 'Чай авторский', 'Лимонад']
 const APP_SECTIONS = [
-  { id: 'techcards', label: 'ТехКарты' },
-  { id: 'schedule', label: 'График смен' },
+  { id: 'techcards', label: 'карточки' },
+  { id: 'schedule', label: 'График' },
   { id: 'writeoffs', label: 'Списания' },
   { id: 'regulations', label: 'Регламенты' },
   { id: 'appearance', label: 'Требования к внешнему виду' },

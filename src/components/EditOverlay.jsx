@@ -1,18 +1,28 @@
-import { useEffect, useState } from 'react'
-import { normalizePhotoUrl } from '../utils/photoUrl'
+import { useEffect, useRef, useState } from 'react'
+import { uploadCardPhoto } from '../api/supabaseClient'
+import { getPhotoCandidates, normalizePhotoUrl } from '../utils/photoUrl'
 
 function EditOverlay({ isOpen, card, categories, onClose, onSave }) {
   const [form, setForm] = useState(null)
   const [saved, setSaved] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [photoUploading, setPhotoUploading] = useState(false)
+  const [photoUploadError, setPhotoUploadError] = useState('')
+  const [photoPreviewBroken, setPhotoPreviewBroken] = useState(false)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     if (card) setForm(card)
     setSaved(false)
     setSubmitError('')
     setIsSubmitting(false)
+    setPhotoUploading(false)
+    setPhotoUploadError('')
+    setPhotoPreviewBroken(false)
   }, [card, isOpen])
+
+  const photoPreviewUrl = form?.photoUrl ? getPhotoCandidates(normalizePhotoUrl(form.photoUrl))[0] || '' : ''
 
   if (!form) return null
 
@@ -40,6 +50,37 @@ function EditOverlay({ isOpen, card, categories, onClose, onSave }) {
       ...prev,
       ingredients: (prev.ingredients || []).filter((_, i) => i !== index),
     }))
+  }
+
+  const handlePhotoAttach = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      setPhotoUploadError('Выберите файл изображения (JPG, PNG, WebP…)')
+      event.target.value = ''
+      return
+    }
+
+    try {
+      setPhotoUploading(true)
+      setPhotoUploadError('')
+      setPhotoPreviewBroken(false)
+      const folder = form?.sheetName ? `techcards/${String(form.sheetName).trim()}` : 'techcards'
+      const uploadedUrl = await uploadCardPhoto(file, { folder })
+      setField('photoUrl', uploadedUrl)
+    } catch (err) {
+      setPhotoUploadError(err?.message || 'Не удалось загрузить фото')
+    } finally {
+      setPhotoUploading(false)
+      event.target.value = ''
+    }
+  }
+
+  const clearPhoto = () => {
+    setField('photoUrl', '')
+    setPhotoUploadError('')
+    setPhotoPreviewBroken(false)
   }
 
   const submit = async (e) => {
@@ -99,12 +140,54 @@ function EditOverlay({ isOpen, card, categories, onClose, onSave }) {
         <label>Бокал<input value={form.glass || ''} onChange={(e) => setField('glass', e.target.value)} /></label>
         <label>Украшение<input value={form.garnish || ''} onChange={(e) => setField('garnish', e.target.value)} /></label>
         <label>
-          Фото URL
-          <input
-            value={form.photoUrl || ''}
-            onChange={(e) => setField('photoUrl', e.target.value)}
-            onBlur={(e) => setField('photoUrl', normalizePhotoUrl(e.target.value))}
-          />
+          Фото
+          <div className="photo-field">
+            <input
+              value={form.photoUrl || ''}
+              onChange={(e) => {
+                setPhotoPreviewBroken(false)
+                setField('photoUrl', e.target.value)
+              }}
+              onBlur={(e) => setField('photoUrl', normalizePhotoUrl(e.target.value))}
+              placeholder="URL или прикрепите файл с устройства"
+            />
+            <div className="photo-field-actions">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="photo-file-input"
+                onChange={handlePhotoAttach}
+              />
+              <button
+                type="button"
+                className="ghost-btn photo-attach-btn"
+                disabled={photoUploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {photoUploading ? 'Загрузка…' : 'Прикрепить с устройства'}
+              </button>
+              {form.photoUrl ? (
+                <button type="button" className="ghost-btn photo-clear-btn" disabled={photoUploading} onClick={clearPhoto}>
+                  Убрать
+                </button>
+              ) : null}
+            </div>
+            {photoPreviewUrl && !photoPreviewBroken ? (
+              <img
+                className="photo-field-preview"
+                src={photoPreviewUrl}
+                alt="Превью фото техкарты"
+                onError={() => setPhotoPreviewBroken(true)}
+              />
+            ) : null}
+            {photoPreviewBroken && form.photoUrl ? (
+              <p className="muted">Превью недоступно, но URL сохранён — проверьте ссылку.</p>
+            ) : null}
+            {photoUploadError ? <p className="error">{photoUploadError}</p> : null}
+            <p className="muted photo-field-hint">Фото сохраняется в Supabase Storage и подставляется в поле URL.</p>
+          </div>
         </label>
         <label>
           Технология

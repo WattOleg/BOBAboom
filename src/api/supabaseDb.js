@@ -3,20 +3,31 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
 export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY)
 
+const TECHCARDS_MIGRATION_KEY = 'techcards_migrated_v1'
+const TECHCARDS_MIGRATION_LOCK_KEY = 'techcards_migration_in_progress'
+const MIGRATION_BATCH_SIZE = 40
+
+const TECHCARD_COLUMNS =
+  'id,sheet_name,name,name_ru,category,yield,time,method,glass,garnish,photo_url,author,date,technology,ingredients,created_at,updated_at'
+
+let migrationPromise = null
+
 async function postToSupabase(path, options = {}) {
   if (!isSupabaseConfigured) {
     throw new Error('Supabase not configured')
   }
 
+  const headers = {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    Prefer: options.prefer || 'return=representation',
+  }
+
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method: options.method || 'GET',
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation',
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
     signal: options.signal,
   })
 
@@ -29,7 +40,7 @@ async function postToSupabase(path, options = {}) {
   }
 
   if (!response.ok) {
-    const message = data?.message || data?.error || `Supabase request failed (${response.status})`
+    const message = data?.message || data?.error || data?.hint || `Supabase request failed (${response.status})`
     throw new Error(message)
   }
 
@@ -55,40 +66,242 @@ export async function readAppData(key, fallback, options = {}) {
 
 export async function writeAppData(key, value, options = {}) {
   if (!isSupabaseConfigured) return value
-  try {
-    const existing = await readAppDataRecord(key, options.signal)
-    const payload = {
-      key,
-      value,
-      updated_at: new Date().toISOString(),
-    }
+  const existing = await readAppDataRecord(key, options.signal)
+  const payload = {
+    key,
+    value,
+    updated_at: new Date().toISOString(),
+  }
 
-    if (existing?.id) {
-      await postToSupabase(`app_data?id=eq.${existing.id}`, {
-        method: 'PATCH',
-        body: payload,
-        signal: options.signal,
-      })
-    } else {
-      await postToSupabase('app_data', {
-        method: 'POST',
-        body: payload,
-        signal: options.signal,
-      })
-    }
-    return value
-  } catch {
-    return value
+  if (existing?.id) {
+    await postToSupabase(`app_data?id=eq.${existing.id}`, {
+      method: 'PATCH',
+      body: payload,
+      signal: options.signal,
+    })
+  } else {
+    await postToSupabase('app_data', {
+      method: 'POST',
+      body: payload,
+      signal: options.signal,
+    })
+  }
+  return value
+}
+
+function normalizeIngredients(raw) {
+  if (!Array.isArray(raw)) return []
+  return raw.map((ingredient) => ({
+    name: String(ingredient?.name || '').trim(),
+    amount: String(ingredient?.amount || '').trim(),
+  }))
+}
+
+export function cardToTechcardRow(card) {
+  const source = card && typeof card === 'object' ? card : {}
+  const sheetName = String(source.sheetName || '').trim()
+  if (!sheetName) {
+    throw new Error('sheetName обязателен для сохранения техкарты')
+  }
+
+  return {
+    sheet_name: sheetName,
+    name: String(source.name || '').trim(),
+    name_ru: String(source.nameRu || '').trim(),
+    category: String(source.category || '').trim(),
+    yield: String(source.yield || '').trim(),
+    time: String(source.time || '').trim(),
+    method: String(source.method || '').trim(),
+    glass: String(source.glass || '').trim(),
+    garnish: String(source.garnish || '').trim(),
+    photo_url: String(source.photoUrl || '').trim(),
+    author: String(source.author || '').trim(),
+    date: String(source.date || '').trim(),
+    technology: String(source.technology || '').trim(),
+    ingredients: normalizeIngredients(source.ingredients),
+    updated_at: new Date().toISOString(),
   }
 }
 
-export async function readTechcardsFromSupabase(options = {}) {
-  const payload = await readAppData('techcards', [], options)
-  return Array.isArray(payload) ? payload : []
+export function techcardRowToCard(row) {
+  if (!row || typeof row !== 'object') return null
+  const sheetName = String(row.sheet_name || '').trim()
+  if (!sheetName) return null
+
+  return {
+    sheetName,
+    name: String(row.name || '').trim(),
+    nameRu: String(row.name_ru || '').trim(),
+    category: String(row.category || '').trim(),
+    yield: String(row.yield || '').trim(),
+    time: String(row.time || '').trim(),
+    method: String(row.method || '').trim(),
+    glass: String(row.glass || '').trim(),
+    garnish: String(row.garnish || '').trim(),
+    photoUrl: String(row.photo_url || '').trim(),
+    author: String(row.author || '').trim(),
+    date: String(row.date || '').trim(),
+    technology: String(row.technology || '').trim(),
+    ingredients: normalizeIngredients(row.ingredients),
+  }
 }
 
+async function fetchTechcardRows(options = {}) {
+  const rows = await postToSupabase(
+    `techcards?select=${TECHCARD_COLUMNS}&order=updated_at.desc`,
+    { signal: options.signal },
+  )
+  if (!Array.isArray(rows)) return []
+  return rows.map(techcardRowToCard).filter(Boolean)
+}
+
+async function countTechcardRows(options = {}) {
+  const rows = await postToSupabase('techcards?select=sheet_name', { signal: options.signal })
+  return Array.isArray(rows) ? rows.length : 0
+}
+
+async function migrateLegacyTechcardsBlob(options = {}) {
+  const migrationFlag = await readAppData(TECHCARDS_MIGRATION_KEY, null, options)
+  if (migrationFlag?.migrated) {
+    return { migrated: false, reason: 'already_migrated', count: migrationFlag.count || 0 }
+  }
+
+  const inProgress = await readAppData(TECHCARDS_MIGRATION_LOCK_KEY, null, options)
+  if (inProgress?.startedAt) {
+    const startedMs = Date.parse(inProgress.startedAt)
+    if (!Number.isNaN(startedMs) && Date.now() - startedMs < 5 * 60 * 1000) {
+      return { migrated: false, reason: 'in_progress', count: 0 }
+    }
+  }
+
+  const existingCount = await countTechcardRows(options)
+  if (existingCount > 0) {
+    await writeAppData(
+      TECHCARDS_MIGRATION_KEY,
+      { migrated: true, count: existingCount, at: new Date().toISOString(), source: 'existing_table' },
+      options,
+    )
+    return { migrated: false, reason: 'table_has_data', count: existingCount }
+  }
+
+  const legacyPayload = await readAppData('techcards', [], options)
+  const legacyCards = Array.isArray(legacyPayload) ? legacyPayload : []
+  if (legacyCards.length === 0) {
+    await writeAppData(
+      TECHCARDS_MIGRATION_KEY,
+      { migrated: true, count: 0, at: new Date().toISOString(), source: 'empty_legacy' },
+      options,
+    )
+    return { migrated: false, reason: 'no_legacy_data', count: 0 }
+  }
+
+  await writeAppData(
+    TECHCARDS_MIGRATION_LOCK_KEY,
+    { startedAt: new Date().toISOString(), total: legacyCards.length },
+    options,
+  )
+
+  const deduped = new Map()
+  for (const card of legacyCards) {
+    try {
+      const normalized = techcardRowToCard(cardToTechcardRow(card))
+      if (normalized) deduped.set(normalized.sheetName, normalized)
+    } catch {
+      // skip invalid legacy rows
+    }
+  }
+  const rows = Array.from(deduped.values()).map(cardToTechcardRow)
+
+  let migratedCount = 0
+  for (let i = 0; i < rows.length; i += MIGRATION_BATCH_SIZE) {
+    const batch = rows.slice(i, i + MIGRATION_BATCH_SIZE)
+    await postToSupabase('techcards?on_conflict=sheet_name', {
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+      body: batch,
+      signal: options.signal,
+    })
+    migratedCount += batch.length
+  }
+
+  await writeAppData(
+    TECHCARDS_MIGRATION_KEY,
+    {
+      migrated: true,
+      count: migratedCount,
+      at: new Date().toISOString(),
+      source: 'app_data',
+      legacyCount: legacyCards.length,
+    },
+    options,
+  )
+  await writeAppData(TECHCARDS_MIGRATION_LOCK_KEY, { finishedAt: new Date().toISOString(), count: migratedCount }, options)
+
+  return { migrated: true, count: migratedCount, legacyCount: legacyCards.length }
+}
+
+export async function ensureTechcardsMigrated(options = {}) {
+  if (!isSupabaseConfigured) return { migrated: false, reason: 'not_configured', count: 0 }
+  if (!migrationPromise) {
+    migrationPromise = migrateLegacyTechcardsBlob(options)
+      .catch((err) => {
+        migrationPromise = null
+        throw err
+      })
+      .then((result) => {
+        migrationPromise = null
+        return result
+      })
+  }
+  return migrationPromise
+}
+
+export async function readTechcardsFromSupabase(options = {}) {
+  if (!isSupabaseConfigured) return []
+
+  try {
+    await ensureTechcardsMigrated(options)
+    return await fetchTechcardRows(options)
+  } catch (err) {
+    const legacyPayload = await readAppData('techcards', [], options)
+    if (Array.isArray(legacyPayload) && legacyPayload.length) {
+      return legacyPayload
+    }
+    throw err
+  }
+}
+
+export async function upsertTechcardInSupabase(card, options = {}) {
+  const row = cardToTechcardRow(card)
+  const result = await postToSupabase('techcards?on_conflict=sheet_name', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    body: row,
+    signal: options.signal,
+  })
+  const saved = Array.isArray(result) ? result[0] : result
+  return techcardRowToCard(saved) || card
+}
+
+export async function deleteTechcardFromSupabase(sheetName, options = {}) {
+  const id = String(sheetName || '').trim()
+  if (!id) throw new Error('sheetName обязателен для удаления')
+  await postToSupabase(`techcards?sheet_name=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    prefer: 'return=minimal',
+    signal: options.signal,
+  })
+  return { success: true, sheetName: id }
+}
+
+/** @deprecated Use upsertTechcardInSupabase / deleteTechcardFromSupabase instead. */
 export async function writeTechcardsToSupabase(cards, options = {}) {
-  return writeAppData('techcards', cards, options)
+  if (!Array.isArray(cards)) return []
+  const results = []
+  for (const card of cards) {
+    results.push(await upsertTechcardInSupabase(card, options))
+  }
+  return results
 }
 
 export async function readSectionsFromSupabase(options = {}) {

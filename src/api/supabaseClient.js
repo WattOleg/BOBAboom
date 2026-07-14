@@ -289,10 +289,43 @@ function buildSupabaseClient() {
     },
     from: (table) => remoteClient.from(table),
     rpc: (fn, params) => remoteClient.rpc(fn, params),
+    storage: remoteClient.storage || localFallbackClient.storage,
   }
 }
 
 const supabase = buildSupabaseClient()
+
+export async function uploadCardPhoto(file, options = {}) {
+  if (!file) {
+    throw new Error('Выберите файл изображения')
+  }
+
+  if (!isSupabaseConfigured) {
+    throw new Error('Supabase Storage не настроен')
+  }
+
+  const bucket = String(options.bucket || import.meta.env.VITE_SUPABASE_STORAGE_BUCKET || 'techcards').trim() || 'techcards'
+  const folder = String(options.folder || 'techcards').replace(/^\/+|\/+$/g, '')
+  const extension = String(file.name || '').split('.').pop()?.trim()
+  const fileName = options.fileName || `${Date.now()}-${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2)}${extension ? `.${extension}` : ''}`
+  const storagePath = folder ? `${folder}/${fileName}` : fileName
+
+  const { data, error } = await supabase.storage.from(bucket).upload(storagePath, file, {
+    cacheControl: '3600',
+    upsert: false,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(storagePath)
+  if (publicData?.publicUrl) {
+    return publicData.publicUrl
+  }
+
+  return `${URL}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodeURIComponent(storagePath)}`
+}
 
 export async function initAuth() {
   if (!isSupabaseConfigured || !isAuthRedirectUrl()) return
