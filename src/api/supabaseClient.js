@@ -295,6 +295,42 @@ function buildSupabaseClient() {
 
 const supabase = buildSupabaseClient()
 
+function hashStorageLabel(value) {
+  return [...String(value || '')].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0).toString(36)
+}
+
+function sanitizeStorageSegment(segment) {
+  const raw = String(segment || '').trim()
+  if (!raw) return 'misc'
+
+  const ascii = raw
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  if (ascii.length >= 2) return ascii.slice(0, 120)
+
+  return `item-${hashStorageLabel(raw)}`
+}
+
+function buildStorageFolder(options = {}) {
+  if (options.sheetName) {
+    const sheetName = String(options.sheetName).trim()
+    if (!sheetName) return 'techcards/misc'
+    return `techcards/${sanitizeStorageSegment(sheetName)}`
+  }
+
+  const folder = String(options.folder || 'techcards').replace(/^\/+|\/+$/g, '')
+  if (!folder) return 'techcards'
+
+  return folder
+    .split('/')
+    .filter(Boolean)
+    .map(sanitizeStorageSegment)
+    .join('/')
+}
+
 export async function uploadCardPhoto(file, options = {}) {
   if (!file) {
     throw new Error('Выберите файл изображения')
@@ -305,18 +341,21 @@ export async function uploadCardPhoto(file, options = {}) {
   }
 
   const bucket = String(options.bucket || import.meta.env.VITE_SUPABASE_STORAGE_BUCKET || 'techcards').trim() || 'techcards'
-  const folder = String(options.folder || 'techcards').replace(/^\/+|\/+$/g, '')
-  const extension = String(file.name || '').split('.').pop()?.trim()
-  const fileName = options.fileName || `${Date.now()}-${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2)}${extension ? `.${extension}` : ''}`
-  const storagePath = folder ? `${folder}/${fileName}` : fileName
+  const folder = buildStorageFolder(options)
+  const extension = String(file.name || '').split('.').pop()?.trim().toLowerCase()
+  const safeExtension = extension && /^[a-z0-9]+$/.test(extension) ? `.${extension}` : '.jpg'
+  const fileName =
+    options.fileName ||
+    `${Date.now()}-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)}${safeExtension}`
+  const storagePath = `${folder}/${fileName}`
 
-  const { data, error } = await supabase.storage.from(bucket).upload(storagePath, file, {
+  const { error } = await supabase.storage.from(bucket).upload(storagePath, file, {
     cacheControl: '3600',
     upsert: false,
   })
 
   if (error) {
-    throw error
+    throw new Error(error.message || 'Не удалось загрузить фото в Supabase Storage')
   }
 
   const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(storagePath)
@@ -324,7 +363,7 @@ export async function uploadCardPhoto(file, options = {}) {
     return publicData.publicUrl
   }
 
-  return `${URL}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodeURIComponent(storagePath)}`
+  return `${URL}/storage/v1/object/public/${encodeURIComponent(bucket)}/${storagePath.split('/').map(encodeURIComponent).join('/')}`
 }
 
 export async function initAuth() {

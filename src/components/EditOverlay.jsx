@@ -67,8 +67,7 @@ function EditOverlay({ isOpen, card, categories, onClose, onSave }) {
       setPhotoUploading(true)
       setPhotoUploadError('')
       setPhotoPreviewBroken(false)
-      const folder = form?.sheetName ? `techcards/${String(form.sheetName).trim()}` : 'techcards'
-      const uploadedUrl = await uploadCardPhoto(file, { folder })
+      const uploadedUrl = await uploadCardPhoto(file, { sheetName: form?.sheetName })
       setField('photoUrl', uploadedUrl)
     } catch (err) {
       setPhotoUploadError(err?.message || 'Не удалось загрузить фото')
