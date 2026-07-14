@@ -30,7 +30,11 @@ function readErrorText(err) {
 function translateAuthError(err, context = 'signIn') {
   const message = readErrorText(err).toLowerCase()
   const status = err?.status
+  const name = String(err?.name || '').toLowerCase()
 
+  if (name.includes('authretryablefetcherror') || status === 500) {
+    return 'Ошибка сервера Auth (500). В Supabase SQL Editor выполните supabase/fix-auth-trigger.sql. Также проверьте: проект не на паузе, Confirm email = OFF, VITE_SUPABASE_URL и ANON_KEY на Vercel верные.'
+  }
   if (message.includes('email not confirmed') || message.includes('email_not_confirmed')) {
     return 'Email не подтверждён. В Supabase: Authentication → Providers → Email → Confirm email = OFF. Затем Users → Confirm user.'
   }
@@ -52,7 +56,7 @@ function translateAuthError(err, context = 'signIn') {
   if (message.includes('rate limit') || status === 429) {
     return 'Слишком много попыток. Подождите минуту.'
   }
-  if (message) return readErrorText(err)
+  if (message && message !== '{}') return readErrorText(err)
   return 'Не удалось выполнить операцию. Проверьте email/пароль или настройки Auth в Supabase.'
 }
 

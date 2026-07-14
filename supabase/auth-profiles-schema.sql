@@ -87,6 +87,10 @@ begin
     email = excluded.email,
     updated_at = now();
   return new;
+exception
+  when others then
+    raise warning 'handle_new_user failed: %', sqlerrm;
+    return new;
 end;
 $$;
 
