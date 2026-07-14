@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import supabase, { getSession, initAuth, isSupabaseConfigured } from '../api/supabaseClient'
-import { fetchProfile, upsertProfileAfterAuth } from '../api/supabaseDb'
+import { fetchProfile, resolveProfileRoleForEmail, upsertProfileAfterAuth } from '../api/supabaseDb'
 
 export function useAuth() {
   const [loading, setLoading] = useState(isSupabaseConfigured)
@@ -84,7 +84,24 @@ export function useAuth() {
   const completeAuth = useCallback(
     async (user, options = {}) => {
       if (!user?.id) return null
-      const row = await upsertProfileAfterAuth(user, options)
+
+      let row = null
+      try {
+        row = await upsertProfileAfterAuth(user, options)
+      } catch (err) {
+        console.warn('Не удалось сохранить профиль', err)
+        try {
+          row = await fetchProfile(user.id, { accessToken: options.accessToken })
+        } catch {
+          row = {
+            id: user.id,
+            email: String(user.email || options.email || '').trim(),
+            fullName: String(options.fullName || user.user_metadata?.full_name || '').trim(),
+            role: resolveProfileRoleForEmail(user.email || options.email),
+          }
+        }
+      }
+
       setSession(await getSession())
       setProfile(row)
       return row

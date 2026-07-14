@@ -9,16 +9,34 @@ function isEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
+function readErrorText(err) {
+  if (!err) return ''
+  if (typeof err === 'string') return err.trim()
+  const candidates = [err.message, err.error_description, err.error, err.msg, err.code]
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim() && value.trim() !== '{}') {
+      return value.trim()
+    }
+  }
+  try {
+    const json = JSON.stringify(err)
+    if (json && json !== '{}' && json !== 'null') return json
+  } catch {
+    // ignore
+  }
+  return ''
+}
+
 function translateAuthError(err, context = 'signIn') {
-  const message = String(err?.message || err?.error_description || err?.code || '').toLowerCase()
-  const status = err?.status || err?.code
+  const message = readErrorText(err).toLowerCase()
+  const status = err?.status
 
   if (message.includes('email not confirmed') || message.includes('email_not_confirmed')) {
-    return 'Email не подтверждён. В Supabase: Authentication → Providers → Email → выключите Confirm email. Затем Authentication → Users → ваш пользователь → Confirm user.'
+    return 'Email не подтверждён. В Supabase: Authentication → Providers → Email → Confirm email = OFF. Затем Users → Confirm user.'
   }
   if (message.includes('invalid login credentials') || message.includes('invalid_credentials')) {
     if (context === 'afterExistingSignUp') {
-      return 'Аккаунт уже есть, но пароль другой (повторная регистрация пароль не меняет). Нажмите «Забыли пароль?» или в Supabase: Users → пользователь → Send password recovery / удалите пользователя и зарегистрируйтесь заново.'
+      return 'Аккаунт уже есть, но пароль другой. Нажмите «Забыли пароль?» или в Supabase → Authentication → Users удалите пользователя и зарегистрируйтесь заново.'
     }
     return 'Неверный email или пароль. Если регистрировались повторно — пароль остался от первой регистрации. Используйте «Забыли пароль?».'
   }
@@ -26,7 +44,7 @@ function translateAuthError(err, context = 'signIn') {
     return 'Этот email уже зарегистрирован. Войдите или сбросьте пароль.'
   }
   if (message.includes('redirect') || message.includes('redirect_to')) {
-    return 'Redirect URL не разрешён. В Supabase → Authentication → URL Configuration добавьте https://bob-aboom.vercel.app и https://bob-aboom.vercel.app/**'
+    return 'Redirect URL не разрешён. В Supabase → Authentication → URL Configuration добавьте https://bob-aboom.vercel.app/**'
   }
   if (message.includes('password') && (message.includes('least') || message.includes('6'))) {
     return 'Пароль должен быть не менее 6 символов'
@@ -34,8 +52,14 @@ function translateAuthError(err, context = 'signIn') {
   if (message.includes('rate limit') || status === 429) {
     return 'Слишком много попыток. Подождите минуту.'
   }
-  if (err?.message) return err.message
-  return 'Ошибка авторизации'
+  if (message) return readErrorText(err)
+  return 'Не удалось выполнить операцию. Проверьте email/пароль или настройки Auth в Supabase.'
+}
+
+function hasAuthError(error) {
+  if (!error) return false
+  if (typeof error === 'string') return Boolean(error.trim())
+  return Boolean(readErrorText(error) || error.status || error.code || error.name)
 }
 
 function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowClose = false, initialMode = 'signIn' }) {
@@ -61,9 +85,9 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
 
   if (!isOpen) return null
 
-  const finishWithSession = (session, normalizedName) => {
+  const finishWithSession = async (session, normalizedName) => {
     if (!session?.user) return false
-    onSuccess({
+    await onSuccess({
       user: session.user,
       session,
       fullName: normalizedName,
@@ -95,9 +119,9 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
           const origin = window.location.origin
           const redirectTo = `${origin}/?reset=1`
           const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, { redirectTo })
-          if (resetError) throw resetError
+          if (hasAuthError(resetError)) throw resetError
           setSuccess(
-            'Если аккаунт существует, письмо ушло на почту. Проверьте Spam. Если письма нет — в Supabase: Authentication → Users → пользователь → отправьте recovery или задайте пароль вручную. Также добавьте Redirect URL: ' +
+            'Если аккаунт существует, письмо ушло на почту. Проверьте Spam. Если письма нет — в Supabase: Authentication → Users удалите пользователя или отправьте recovery. Redirect URL: ' +
               origin +
               '/**',
           )
@@ -129,14 +153,13 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
             email: normalizedEmail,
             password: normalizedPassword,
           })
-          if (signInError) throw signInError
-          if (!finishWithSession(data?.session, normalizedName)) {
+          if (hasAuthError(signInError)) throw signInError
+          if (!(await finishWithSession(data?.session, normalizedName))) {
             setSuccess('Вход выполнен. Если интерфейс не обновился, перезагрузите страницу.')
           }
           return
         }
 
-        // signUp
         const { data, error: signUpError } = await supabase.auth.signUp({
           email: normalizedEmail,
           password: normalizedPassword,
@@ -147,33 +170,34 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
             },
           },
         })
-        if (signUpError) throw signUpError
+        if (hasAuthError(signUpError)) throw signUpError
 
-        if (finishWithSession(data?.session, normalizedName)) return
+        if (await finishWithSession(data?.session, normalizedName)) return
 
-        const alreadyExists = data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0
+        const alreadyExists = Boolean(
+          data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0,
+        )
 
-        // Если аккаунт уже есть или confirm email включён — пробуем сразу войти тем же паролем
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
           email: normalizedEmail,
           password: normalizedPassword,
         })
 
-        if (!signInError && finishWithSession(signInData?.session, normalizedName)) return
-
-        if (alreadyExists) {
-          setMode('signIn')
-          setError(translateAuthError(signInError || { message: 'invalid login credentials' }, 'afterExistingSignUp'))
-          return
-        }
-
-        if (signInError) {
-          setMode('signIn')
-          setError(translateAuthError(signInError, 'signIn'))
+        if (!hasAuthError(signInError) && (await finishWithSession(signInData?.session, normalizedName))) {
           return
         }
 
         setMode('signIn')
+        if (alreadyExists) {
+          setError(translateAuthError(signInError || { message: 'invalid login credentials' }, 'afterExistingSignUp'))
+          return
+        }
+
+        if (hasAuthError(signInError)) {
+          setError(translateAuthError(signInError, 'signIn'))
+          return
+        }
+
         setSuccess('Аккаунт создан. Теперь войдите с тем же email и паролем.')
       } catch (err) {
         setError(translateAuthError(err, mode))
@@ -236,7 +260,7 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
                   ? 'Зарегистрироваться'
                   : 'Отправить ссылку'}
           </button>
-          {error ? <p className="error auth-error">{error}</p> : null}
+          {error ? <p className="error auth-error">{String(error)}</p> : null}
           {success ? <p className="muted auth-success">{success}</p> : null}
         </form>
         {mode === 'signIn' ? (
