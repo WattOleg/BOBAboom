@@ -1192,15 +1192,138 @@ h1 {
   min-height: 100svh;
 }
 
-.auth-user-badge {
-  max-width: 180px;
+.account-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.account-login-btn,
+.account-chip {
+  border: 1px solid #dbe4f0;
+  background: #fff;
+  color: var(--text);
+  border-radius: 999px;
+  min-height: 42px;
+  padding: 4px 10px 4px 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 160px;
+}
+
+.account-login-btn {
+  padding: 0 14px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.account-chip.is-open {
+  box-shadow: 0 0 0 2px rgba(11, 99, 214, 0.18);
+}
+
+.account-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  flex: 0 0 auto;
+}
+
+.account-avatar-lg {
+  width: 48px;
+  height: 48px;
+  font-size: 15px;
+}
+
+.account-chip-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  text-align: left;
+}
+
+.account-chip-name {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.account-chip-role {
+  font-size: 10px;
+  color: var(--text3);
+  line-height: 1.1;
+}
+
+.account-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(280px, calc(100vw - 32px));
+  background: #fff;
+  border-radius: 18px;
+  border: 1px solid #e6edf7;
+  box-shadow: 0 16px 40px rgba(15, 27, 51, 0.14);
+  padding: 14px;
+  z-index: 20;
+  display: grid;
+  gap: 14px;
+}
+
+.account-panel-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.account-panel-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.account-panel-name {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.account-panel-email {
   font-size: 12px;
-  padding: 8px 10px;
+  color: var(--text2);
+  overflow-wrap: anywhere;
+}
+
+.account-role-pill {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 4px;
   border-radius: 999px;
-  background: var(--surface);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--surface2);
+  color: var(--text2);
+}
+
+.account-role-pill.is-admin {
+  background: #e8f1ff;
+  color: var(--accent-strong);
+}
+
+.account-panel-actions {
+  display: grid;
+}
+
+.account-signout-btn {
+  width: 100%;
 }
 
 .muted {

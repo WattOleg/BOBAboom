@@ -674,15 +674,14 @@ function App() {
             onRefresh={refresh}
             onExportSelected={exportSelectedCards}
             onCreate={() => requestAction('create')}
-            auth={
-              auth.authRequired
-                ? {
-                    email: auth.email,
-                    isAdmin: auth.isAdmin,
-                    onSignOut: auth.signOut,
-                  }
-                : null
-            }
+            auth={{
+              isAuthenticated: auth.isAuthenticated,
+              email: auth.email,
+              fullName: auth.profile?.fullName || '',
+              isAdmin: auth.isAdmin,
+              onSignOut: auth.signOut,
+              onSignIn: () => setAuthGateOpen(true),
+            }}
             stopList={{
               data: stopListData,
               loading: stopListLoading,
