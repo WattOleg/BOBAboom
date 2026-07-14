@@ -208,9 +208,17 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (auth.passwordRecovery) {
+      setResetPasswordOpen(true)
+      setAuthGateOpen(false)
+    }
+  }, [auth.passwordRecovery])
+
+  useEffect(() => {
     if (!auth.authRequired) return
+    if (auth.passwordRecovery || resetPasswordOpen) return
     setAuthGateOpen(!auth.loading && !auth.isAuthenticated)
-  }, [auth.authRequired, auth.isAuthenticated, auth.loading])
+  }, [auth.authRequired, auth.isAuthenticated, auth.loading, auth.passwordRecovery, resetPasswordOpen])
 
   const categories = useMemo(
     () => {
@@ -819,11 +827,13 @@ function App() {
         isOpen={resetPasswordOpen}
         onSuccess={async () => {
           setResetPasswordOpen(false)
+          auth.clearPasswordRecovery()
           window.history.replaceState(null, '', window.location.pathname)
           await auth.refreshAuth()
         }}
         onClose={() => {
           setResetPasswordOpen(false)
+          auth.clearPasswordRecovery()
           window.history.replaceState(null, '', window.location.pathname)
         }}
       />

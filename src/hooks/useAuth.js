@@ -6,6 +6,7 @@ export function useAuth() {
   const [loading, setLoading] = useState(isSupabaseConfigured)
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
 
   const loadProfile = useCallback(async (user) => {
     if (!user?.id) {
@@ -52,7 +53,10 @@ export function useAuth() {
   useEffect(() => {
     if (!isSupabaseConfigured) return undefined
 
-    const { data } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true)
+      }
       setSession(nextSession)
       if (nextSession?.user) {
         await loadProfile(nextSession.user)
@@ -66,6 +70,10 @@ export function useAuth() {
       data?.subscription?.unsubscribe?.()
     }
   }, [loadProfile])
+
+  const clearPasswordRecovery = useCallback(() => {
+    setPasswordRecovery(false)
+  }, [])
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()
@@ -95,6 +103,8 @@ export function useAuth() {
     refreshAuth,
     completeAuth,
     signOut,
+    passwordRecovery,
+    clearPasswordRecovery,
     authRequired: isSupabaseConfigured,
   }
 }

@@ -9,24 +9,30 @@ function isEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
-function translateAuthError(err) {
-  const message = String(err?.message || err?.error_description || '').toLowerCase()
+function translateAuthError(err, context = 'signIn') {
+  const message = String(err?.message || err?.error_description || err?.code || '').toLowerCase()
   const status = err?.status || err?.code
 
-  if (message.includes('invalid login credentials') || message.includes('invalid_credentials')) {
-    return 'Неверный email или пароль. Если аккаунта ещё нет — нажмите «Создать новый аккаунт».'
-  }
   if (message.includes('email not confirmed') || message.includes('email_not_confirmed')) {
-    return 'Email ещё не подтверждён. В Supabase: Authentication → Providers → Email → Confirm email = OFF, либо подтвердите письмо.'
+    return 'Email не подтверждён. В Supabase: Authentication → Providers → Email → выключите Confirm email. Затем Authentication → Users → ваш пользователь → Confirm user.'
+  }
+  if (message.includes('invalid login credentials') || message.includes('invalid_credentials')) {
+    if (context === 'afterExistingSignUp') {
+      return 'Аккаунт уже есть, но пароль другой (повторная регистрация пароль не меняет). Нажмите «Забыли пароль?» или в Supabase: Users → пользователь → Send password recovery / удалите пользователя и зарегистрируйтесь заново.'
+    }
+    return 'Неверный email или пароль. Если регистрировались повторно — пароль остался от первой регистрации. Используйте «Забыли пароль?».'
   }
   if (message.includes('user already registered') || message.includes('already been registered')) {
     return 'Этот email уже зарегистрирован. Войдите или сбросьте пароль.'
+  }
+  if (message.includes('redirect') || message.includes('redirect_to')) {
+    return 'Redirect URL не разрешён. В Supabase → Authentication → URL Configuration добавьте https://bob-aboom.vercel.app и https://bob-aboom.vercel.app/**'
   }
   if (message.includes('password') && (message.includes('least') || message.includes('6'))) {
     return 'Пароль должен быть не менее 6 символов'
   }
   if (message.includes('rate limit') || status === 429) {
-    return 'Слишком много попыток. Подождите минуту и попробуйте снова.'
+    return 'Слишком много попыток. Подождите минуту.'
   }
   if (err?.message) return err.message
   return 'Ошибка авторизации'
@@ -55,6 +61,16 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
 
   if (!isOpen) return null
 
+  const finishWithSession = (session, normalizedName) => {
+    if (!session?.user) return false
+    onSuccess({
+      user: session.user,
+      session,
+      fullName: normalizedName,
+    })
+    return true
+  }
+
   const submit = (event) => {
     event.preventDefault()
     const normalizedEmail = normalizeCredential(email).toLowerCase()
@@ -76,12 +92,17 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
         setError('')
         setSuccess('')
         try {
-          const redirectTo = `${window.location.origin}${window.location.pathname}?reset=1`
+          const origin = window.location.origin
+          const redirectTo = `${origin}/?reset=1`
           const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, { redirectTo })
           if (resetError) throw resetError
-          setSuccess('Письмо для сброса пароля отправлено. Проверьте почту (и папку Спам).')
+          setSuccess(
+            'Если аккаунт существует, письмо ушло на почту. Проверьте Spam. Если письма нет — в Supabase: Authentication → Users → пользователь → отправьте recovery или задайте пароль вручную. Также добавьте Redirect URL: ' +
+              origin +
+              '/**',
+          )
         } catch (err) {
-          setError(translateAuthError(err))
+          setError(translateAuthError(err, 'reset'))
         } finally {
           setSubmitting(false)
         }
@@ -109,67 +130,53 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
             password: normalizedPassword,
           })
           if (signInError) throw signInError
-          if (data?.session?.user) {
-            onSuccess({
-              user: data.session.user,
-              session: data.session,
-              fullName: normalizedName,
-            })
-          } else {
+          if (!finishWithSession(data?.session, normalizedName)) {
             setSuccess('Вход выполнен. Если интерфейс не обновился, перезагрузите страницу.')
           }
-        } else {
-          const { data, error: signUpError } = await supabase.auth.signUp({
-            email: normalizedEmail,
-            password: normalizedPassword,
-            options: {
-              data: {
-                full_name: normalizedName,
-              },
-            },
-          })
-          if (signUpError) throw signUpError
-
-          if (data?.session?.user) {
-            onSuccess({
-              user: data.session.user,
-              session: data.session,
-              fullName: normalizedName,
-            })
-            return
-          }
-
-          if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-            setError('Этот email уже зарегистрирован. Войдите или сбросьте пароль.')
-            setMode('signIn')
-            return
-          }
-
-          if (data?.user) {
-            const { data: signInData, error: signInAfterSignUpError } = await supabase.auth.signInWithPassword({
-              email: normalizedEmail,
-              password: normalizedPassword,
-            })
-            if (!signInAfterSignUpError && signInData?.session?.user) {
-              onSuccess({
-                user: signInData.session.user,
-                session: signInData.session,
-                fullName: normalizedName,
-              })
-              return
-            }
-            setSuccess(
-              'Аккаунт создан, но вход сразу не удался. В Supabase выключите Confirm email или подтвердите письмо, затем войдите.',
-            )
-            setMode('signIn')
-            return
-          }
-
-          setSuccess('Регистрация отправлена. Попробуйте войти.')
-          setMode('signIn')
+          return
         }
+
+        // signUp
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password: normalizedPassword,
+          options: {
+            emailRedirectTo: `${window.location.origin}/`,
+            data: {
+              full_name: normalizedName,
+            },
+          },
+        })
+        if (signUpError) throw signUpError
+
+        if (finishWithSession(data?.session, normalizedName)) return
+
+        const alreadyExists = data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0
+
+        // Если аккаунт уже есть или confirm email включён — пробуем сразу войти тем же паролем
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password: normalizedPassword,
+        })
+
+        if (!signInError && finishWithSession(signInData?.session, normalizedName)) return
+
+        if (alreadyExists) {
+          setMode('signIn')
+          setError(translateAuthError(signInError || { message: 'invalid login credentials' }, 'afterExistingSignUp'))
+          return
+        }
+
+        if (signInError) {
+          setMode('signIn')
+          setError(translateAuthError(signInError, 'signIn'))
+          return
+        }
+
+        setMode('signIn')
+        setSuccess('Аккаунт создан. Теперь войдите с тем же email и паролем.')
       } catch (err) {
-        setError(translateAuthError(err))
+        setError(translateAuthError(err, mode))
       } finally {
         setSubmitting(false)
       }
@@ -185,10 +192,10 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
         <h3>{title || heading}</h3>
         <p className="muted auth-hint">
           {mode === 'resetPassword'
-            ? 'Мы отправим ссылку для установки нового пароля на ваш email.'
+            ? 'Ссылка придёт на email. Если письма нет — проверьте Spam или задайте пароль в Supabase → Authentication → Users.'
             : mode === 'signUp'
-              ? 'Создайте аккаунт один раз. После этого входите тем же email и паролем.'
-              : 'Сначала зарегистрируйтесь, если входите впервые.'}
+              ? 'Создайте аккаунт один раз. Повторная регистрация пароль не меняет.'
+              : 'Вход по email и паролю. Первый раз — «Создать новый аккаунт».'}
         </p>
         <form onSubmit={submit} className="auth-form">
           {mode === 'signUp' ? (
@@ -245,18 +252,19 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
             Забыли пароль?
           </button>
         ) : null}
-        <button
-          type="button"
-          className="ghost-btn auth-toggle"
-          onClick={() => {
-            setMode(mode === 'signIn' ? 'signUp' : 'signIn')
-            setError('')
-            setSuccess('')
-          }}
-        >
-          {mode === 'signIn' ? 'Создать новый аккаунт' : 'Уже есть аккаунт? Войти'}
-        </button>
-        {mode === 'resetPassword' ? (
+        {mode !== 'resetPassword' ? (
+          <button
+            type="button"
+            className="ghost-btn auth-toggle"
+            onClick={() => {
+              setMode(mode === 'signIn' ? 'signUp' : 'signIn')
+              setError('')
+              setSuccess('')
+            }}
+          >
+            {mode === 'signIn' ? 'Создать новый аккаунт' : 'Уже есть аккаунт? Войти'}
+          </button>
+        ) : (
           <button
             type="button"
             className="ghost-btn auth-toggle"
@@ -268,7 +276,7 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
           >
             Назад ко входу
           </button>
-        ) : null}
+        )}
         {!isSupabaseConfigured ? (
           <p className="error auth-error">Supabase не настроен. Проверьте VITE_SUPABASE_URL и VITE_SUPABASE_ANON_KEY.</p>
         ) : null}
