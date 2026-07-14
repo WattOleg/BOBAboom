@@ -8,7 +8,7 @@ import ResetPasswordModal from './components/ResetPasswordModal'
 import { useAuth } from './hooks/useAuth'
 import { useCards } from './hooks/useCards'
 import { setSupabaseSessionTokenGetter } from './api/supabaseDb'
-import { getSession, initAuth } from './api/supabaseClient'
+import { getSession } from './api/supabaseClient'
 import {
   createCard,
   deleteCard,

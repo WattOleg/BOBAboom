@@ -62,7 +62,9 @@ export function useAuth() {
       setLoading(false)
     })
 
-    return () => data.subscription.unsubscribe()
+    return () => {
+      data?.subscription?.unsubscribe?.()
+    }
   }, [loadProfile])
 
   const signOut = useCallback(async () => {
