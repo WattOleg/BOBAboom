@@ -3,7 +3,12 @@ import ListView from './components/ListView'
 import DetailView from './components/DetailView'
 import EditOverlay from './components/EditOverlay'
 import PinModal from './components/PinModal'
+import AuthGate from './components/AuthGate'
+import ResetPasswordModal from './components/ResetPasswordModal'
+import { useAuth } from './hooks/useAuth'
 import { useCards } from './hooks/useCards'
+import { setSupabaseSessionTokenGetter } from './api/supabaseDb'
+import { getSession, initAuth } from './api/supabaseClient'
 import {
   createCard,
   deleteCard,
@@ -146,6 +151,7 @@ const DEFAULT_WRITEOFFS = { entries: [], templates: [] }
 const DEFAULT_STOP_LIST = []
 
 function App() {
+  const auth = useAuth()
   const { cards, loading, error, refresh, addLocalCard, updateLocalCard, removeLocalCard } = useCards()
   const [visitCount, setVisitCount] = useState(null)
   const [view, setView] = useState('list')
@@ -161,9 +167,10 @@ function App() {
   const [sectionSaving, setSectionSaving] = useState(false)
   const [sectionSaveError, setSectionSaveError] = useState('')
   const [scheduleData, setScheduleData] = useState(DEFAULT_SCHEDULE)
-  const [scheduleUnlocked, setScheduleUnlocked] = useState(false)
   const [scheduleSaving, setScheduleSaving] = useState(false)
   const [scheduleSaveError, setScheduleSaveError] = useState('')
+  const [authGateOpen, setAuthGateOpen] = useState(false)
+  const [resetPasswordOpen, setResetPasswordOpen] = useState(false)
   const [adminPinOpen, setAdminPinOpen] = useState(false)
   const [pendingEditAction, setPendingEditAction] = useState(null)
   const [scheduleLoadError, setScheduleLoadError] = useState('')
@@ -185,6 +192,26 @@ function App() {
   )
   const scheduleSerialized = useMemo(() => JSON.stringify(scheduleData), [scheduleData])
   const scheduleDirty = Boolean(scheduleBaseline) && scheduleSerialized !== scheduleBaseline
+  useEffect(() => {
+    setSupabaseSessionTokenGetter(async () => {
+      const session = await getSession()
+      return session?.access_token || null
+    })
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (url.searchParams.get('reset') === '1' || window.location.hash.includes('type=recovery')) {
+      setResetPasswordOpen(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!auth.authRequired) return
+    setAuthGateOpen(!auth.loading && !auth.isAuthenticated)
+  }, [auth.authRequired, auth.isAuthenticated, auth.loading])
+
   const categories = useMemo(
     () => {
       const unique = [...new Set(cards.map((card) => String(card.category || '').trim()).filter(Boolean))]
@@ -276,10 +303,6 @@ function App() {
       active = false
     }
   }, [])
-
-  useEffect(() => {
-    if (activeSection !== 'schedule') setScheduleUnlocked(false)
-  }, [activeSection])
 
   useEffect(() => {
     const onVisit = (e) => {
@@ -387,8 +410,12 @@ function App() {
     }
   }
 
-  const requestScheduleUnlock = () => {
-    setScheduleUnlocked(true)
+  const handleAuthSuccess = async ({ user, session, fullName }) => {
+    await auth.completeAuth(user, {
+      fullName,
+      accessToken: session?.access_token,
+    })
+    setAuthGateOpen(false)
   }
 
   const handleAdminPinSuccess = () => {
@@ -436,9 +463,6 @@ function App() {
         setSectionSaveError('')
       }
       return
-    }
-    if (action?.type === 'scheduleUnlock') {
-      setScheduleUnlocked(true)
     }
   }
 
@@ -496,6 +520,10 @@ function App() {
   }
 
   const saveScheduleToSheet = async () => {
+    if (auth.authRequired && !auth.isAdmin) {
+      setScheduleSaveError('Редактирование графика доступно только администратору')
+      return
+    }
     try {
       setScheduleSaving(true)
       setScheduleSaveError('')
@@ -604,6 +632,14 @@ function App() {
     }
   }
 
+  if (auth.authRequired && auth.loading) {
+    return (
+      <div className="app-shell auth-boot">
+        <p className="muted">Загружаем сессию...</p>
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
       <div
@@ -630,6 +666,15 @@ function App() {
             onRefresh={refresh}
             onExportSelected={exportSelectedCards}
             onCreate={() => requestAction('create')}
+            auth={
+              auth.authRequired
+                ? {
+                    email: auth.email,
+                    isAdmin: auth.isAdmin,
+                    onSignOut: auth.signOut,
+                  }
+                : null
+            }
             stopList={{
               data: stopListData,
               loading: stopListLoading,
@@ -654,15 +699,14 @@ function App() {
                 ? {
                     data: scheduleData,
                     onChange: setScheduleData,
-                    canEdit: scheduleUnlocked,
-                    onRequestUnlock: requestScheduleUnlock,
-                    onExitEdit: () => setScheduleUnlocked(false),
+                    canEdit: auth.authRequired ? auth.isAdmin : false,
                     onSave: saveScheduleToSheet,
                     saving: scheduleSaving,
                     loading: scheduleLoading,
                     saveError: scheduleSaveError,
                     loadError: scheduleLoadError,
                     saveState: { dirty: scheduleDirty, savedAt: scheduleSavedAt },
+                    viewerEmail: auth.email,
                     onReload: async () => {
                       try {
                         setScheduleLoading(true)
@@ -768,6 +812,21 @@ function App() {
           </div>
         </div>
       ) : null}
+
+      <AuthGate isOpen={authGateOpen} onSuccess={handleAuthSuccess} allowClose={false} />
+
+      <ResetPasswordModal
+        isOpen={resetPasswordOpen}
+        onSuccess={async () => {
+          setResetPasswordOpen(false)
+          window.history.replaceState(null, '', window.location.pathname)
+          await auth.refreshAuth()
+        }}
+        onClose={() => {
+          setResetPasswordOpen(false)
+          window.history.replaceState(null, '', window.location.pathname)
+        }}
+      />
     </div>
   )
 }

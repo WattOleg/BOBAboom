@@ -25,6 +25,7 @@ function ListView({
   stopList,
   schedule,
   writeoffs,
+  auth = null,
 }) {
   const rootRef = useRef(null)
   const [query, setQuery] = useState('')
@@ -190,6 +191,12 @@ function ListView({
             </div>
           </div>
           <div className="list-header-badges">
+            {auth?.email ? (
+              <button type="button" className="auth-user-badge ghost-btn" onClick={auth.onSignOut} title="Выйти">
+                {auth.isAdmin ? 'Admin · ' : ''}
+                {auth.email}
+              </button>
+            ) : null}
             {visitCount != null ? (
               <div
                 className="app-visit-counter"

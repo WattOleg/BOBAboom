@@ -110,6 +110,7 @@ function ScheduleView({
   loadError,
   saveState,
   onReload,
+  viewerEmail = '',
 }) {
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
@@ -125,6 +126,7 @@ function ScheduleView({
   const [payrollEmployeeFilter, setPayrollEmployeeFilter] = useState('')
   const [payrollUnlocked, setPayrollUnlocked] = useState({})
   const [payrollPinModal, setPayrollPinModal] = useState({ open: false, employeeId: '', employeeName: '' })
+  const normalizedViewerEmail = String(viewerEmail || '').trim().toLowerCase()
   const [payrollPinVerifying, setPayrollPinVerifying] = useState(false)
   const [dayModal, setDayModal] = useState(null)
   const [dayModalError, setDayModalError] = useState('')
@@ -179,6 +181,16 @@ function ScheduleView({
     if (Array.isArray(list)) return list
     return []
   }, [data.employeesByMonth, monthKey])
+
+  useEffect(() => {
+    if (canEdit || !normalizedViewerEmail) return
+    const matched = monthEmployees.find(
+      (employee) => String(employee.email || '').trim().toLowerCase() === normalizedViewerEmail,
+    )
+    if (matched?.id) {
+      setCalendarEmployeeFilter(matched.id)
+    }
+  }, [canEdit, monthEmployees, normalizedViewerEmail])
 
   const shiftsByDate = useMemo(() => {
     const map = new Map()
@@ -406,7 +418,7 @@ function ScheduleView({
     const color = PRESET_COLORS[(monthEmployees || []).length % PRESET_COLORS.length]
     const next = [
       ...(monthEmployees || []),
-      { id: newEmployeeId(), name: 'Сотрудник', color, hourlyRate: 300 },
+      { id: newEmployeeId(), name: 'Сотрудник', email: '', color, hourlyRate: 300 },
     ]
     setMonthEmployees(next)
   }
@@ -729,15 +741,19 @@ function ScheduleView({
 
       <div className="schedule-toolbar schedule-toolbar-row">
         {!canEdit ? (
-          <button
-            type="button"
-            className="btn btn-dark schedule-toolbar-icon-btn"
-            onClick={onRequestUnlock}
-            aria-label="Редактировать график (PIN)"
-            title="Редактировать"
-          >
-            <ToolbarIcon type="edit" />
-          </button>
+          onRequestUnlock ? (
+            <button
+              type="button"
+              className="btn btn-dark schedule-toolbar-icon-btn"
+              onClick={onRequestUnlock}
+              aria-label="Редактировать график (PIN)"
+              title="Редактировать"
+            >
+              <ToolbarIcon type="edit" />
+            </button>
+          ) : (
+            <span className="muted small schedule-readonly-hint">График: только просмотр</span>
+          )
         ) : (
           <button
             type="button"
@@ -841,6 +857,15 @@ function ScheduleView({
                   onChange={(ev) => updateEmployee(e.id, { name: ev.target.value })}
                   disabled={!canEdit}
                   placeholder="Имя"
+                />
+                <input
+                  className="schedule-emp-email"
+                  type="email"
+                  inputMode="email"
+                  value={e.email || ''}
+                  onChange={(ev) => updateEmployee(e.id, { email: ev.target.value.trim() })}
+                  disabled={!canEdit}
+                  placeholder="Email для привязки к аккаунту"
                 />
                 {canEdit ? (
                 <label className="schedule-rate">

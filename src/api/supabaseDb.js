@@ -3,6 +3,13 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
 export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY)
 
+const ADMIN_EMAILS = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+  .split(',')
+  .map((item) => item.trim().toLowerCase())
+  .filter(Boolean)
+
+const PROFILE_COLUMNS = 'id,email,full_name,role,created_at,updated_at'
+
 const TECHCARDS_MIGRATION_KEY = 'techcards_migrated_v1'
 const TECHCARDS_MIGRATION_LOCK_KEY = 'techcards_migration_in_progress'
 const MIGRATION_BATCH_SIZE = 40
@@ -11,15 +18,34 @@ const TECHCARD_COLUMNS =
   'id,sheet_name,name,name_ru,category,yield,time,method,glass,garnish,photo_url,author,date,technology,ingredients,created_at,updated_at'
 
 let migrationPromise = null
+let sessionTokenGetter = null
+
+export function setSupabaseSessionTokenGetter(getter) {
+  sessionTokenGetter = typeof getter === 'function' ? getter : null
+}
+
+async function resolveAccessToken(options = {}) {
+  if (options.accessToken) return options.accessToken
+  if (sessionTokenGetter) {
+    try {
+      const token = await sessionTokenGetter()
+      if (token) return token
+    } catch {
+      // fall back to anon key
+    }
+  }
+  return SUPABASE_ANON_KEY
+}
 
 async function postToSupabase(path, options = {}) {
   if (!isSupabaseConfigured) {
     throw new Error('Supabase not configured')
   }
 
+  const accessToken = await resolveAccessToken(options)
   const headers = {
     apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
     Prefer: options.prefer || 'return=representation',
   }
@@ -338,4 +364,63 @@ export async function readStopListFromSupabase(options = {}) {
 
 export async function writeStopListToSupabase(stopList, options = {}) {
   return writeAppData('stop_list', stopList, options)
+}
+
+export function profileRowToProfile(row) {
+  if (!row || typeof row !== 'object') return null
+  return {
+    id: row.id,
+    email: String(row.email || '').trim(),
+    fullName: String(row.full_name || '').trim(),
+    role: row.role === 'admin' ? 'admin' : 'staff',
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  }
+}
+
+export function resolveProfileRoleForEmail(email) {
+  const normalized = String(email || '').trim().toLowerCase()
+  if (!normalized) return 'staff'
+  return ADMIN_EMAILS.includes(normalized) ? 'admin' : 'staff'
+}
+
+export async function fetchProfile(userId, options = {}) {
+  if (!isSupabaseConfigured || !userId) return null
+  const rows = await postToSupabase(`profiles?select=${PROFILE_COLUMNS}&id=eq.${encodeURIComponent(userId)}&limit=1`, options)
+  if (!Array.isArray(rows) || !rows.length) return null
+  return profileRowToProfile(rows[0])
+}
+
+export async function upsertProfileAfterAuth(user, options = {}) {
+  if (!isSupabaseConfigured || !user?.id) return null
+
+  const email = String(user.email || options.email || '').trim()
+  const fullName = String(options.fullName || user.user_metadata?.full_name || '').trim()
+  const role = options.role || resolveProfileRoleForEmail(email)
+  const payload = {
+    id: user.id,
+    email,
+    full_name: fullName,
+    role,
+    updated_at: new Date().toISOString(),
+  }
+
+  const existing = await fetchProfile(user.id, options)
+  if (existing) {
+    await postToSupabase(`profiles?id=eq.${encodeURIComponent(user.id)}`, {
+      method: 'PATCH',
+      body: payload,
+      prefer: 'return=representation',
+      accessToken: options.accessToken,
+    })
+  } else {
+    await postToSupabase('profiles', {
+      method: 'POST',
+      body: payload,
+      prefer: 'return=representation',
+      accessToken: options.accessToken,
+    })
+  }
+
+  return fetchProfile(user.id, options)
 }
