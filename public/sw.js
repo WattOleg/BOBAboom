@@ -1,6 +1,13 @@
-const STATIC_CACHE = 'tk-static-v4'
-const RUNTIME_CACHE = 'tk-runtime-v4'
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/e-Bar.png']
+const STATIC_CACHE = 'tk-static-v5'
+const RUNTIME_CACHE = 'tk-runtime-v5'
+const APP_SHELL = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
+]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
