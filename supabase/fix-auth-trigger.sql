@@ -11,7 +11,7 @@ begin
   insert into public.profiles (id, email, full_name, role)
   values (
     new.id,
-    new.email,
+    lower(coalesce(new.email, '')),
     coalesce(new.raw_user_meta_data->>'full_name', ''),
     case
       when lower(coalesce(new.email, '')) = 'umaev1998@mail.ru' then 'admin'
@@ -24,11 +24,16 @@ begin
       when excluded.full_name <> '' then excluded.full_name
       else public.profiles.full_name
     end,
+    -- Never demote an existing admin.
+    role = case
+      when public.profiles.role = 'admin' then 'admin'
+      when excluded.role = 'admin' then 'admin'
+      else public.profiles.role
+    end,
     updated_at = now();
   return new;
 exception
   when others then
-    -- Never block Auth signup/sign-in because of profile write failures.
     raise warning 'handle_new_user failed: %', sqlerrm;
     return new;
 end;

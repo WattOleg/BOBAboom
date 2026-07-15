@@ -3,10 +3,16 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
 export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY)
 
-const ADMIN_EMAILS = String(import.meta.env.VITE_ADMIN_EMAILS || '')
-  .split(',')
-  .map((item) => item.trim().toLowerCase())
-  .filter(Boolean)
+/** Bootstrap admins (always admin). Добавляйте email через VITE_ADMIN_EMAILS на Vercel. */
+const BOOTSTRAP_ADMIN_EMAILS = ['umaev1998@mail.ru']
+
+const ADMIN_EMAILS = [
+  ...BOOTSTRAP_ADMIN_EMAILS,
+  ...String(import.meta.env.VITE_ADMIN_EMAILS || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean),
+]
 
 const PROFILE_COLUMNS = 'id,email,full_name,role,created_at,updated_at'
 
@@ -384,6 +390,10 @@ export function resolveProfileRoleForEmail(email) {
   return ADMIN_EMAILS.includes(normalized) ? 'admin' : 'staff'
 }
 
+export function isAdminEmail(email) {
+  return resolveProfileRoleForEmail(email) === 'admin'
+}
+
 export async function fetchProfile(userId, options = {}) {
   if (!isSupabaseConfigured || !userId) return null
   const rows = await postToSupabase(`profiles?select=${PROFILE_COLUMNS}&id=eq.${encodeURIComponent(userId)}&limit=1`, options)
@@ -391,21 +401,29 @@ export async function fetchProfile(userId, options = {}) {
   return profileRowToProfile(rows[0])
 }
 
+/**
+ * Sync profile on auth. Never downgrades admin → staff.
+ * Email from AUTH is source of truth; empty values do not wipe existing fields.
+ */
 export async function upsertProfileAfterAuth(user, options = {}) {
   if (!isSupabaseConfigured || !user?.id) return null
 
-  const email = String(user.email || options.email || '').trim()
-  const fullName = String(options.fullName || user.user_metadata?.full_name || '').trim()
-  const role = options.role || resolveProfileRoleForEmail(email)
+  const email = String(user.email || options.email || '').trim().toLowerCase()
+  const incomingName = String(options.fullName || user.user_metadata?.full_name || '').trim()
+  const existing = await fetchProfile(user.id, options)
+
+  const emailAdmin = resolveProfileRoleForEmail(email)
+  const existingAdmin = existing?.role === 'admin'
+  const role = emailAdmin === 'admin' || existingAdmin || options.role === 'admin' ? 'admin' : 'staff'
+
   const payload = {
     id: user.id,
-    email,
-    full_name: fullName,
+    email: email || existing?.email || '',
+    full_name: incomingName || existing?.fullName || '',
     role,
     updated_at: new Date().toISOString(),
   }
 
-  const existing = await fetchProfile(user.id, options)
   if (existing) {
     await postToSupabase(`profiles?id=eq.${encodeURIComponent(user.id)}`, {
       method: 'PATCH',

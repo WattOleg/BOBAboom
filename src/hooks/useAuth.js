@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import supabase, { getSession, initAuth, isSupabaseConfigured } from '../api/supabaseClient'
-import { fetchProfile, resolveProfileRoleForEmail, upsertProfileAfterAuth } from '../api/supabaseDb'
+import { fetchProfile, isAdminEmail, resolveProfileRoleForEmail, upsertProfileAfterAuth } from '../api/supabaseDb'
 
 export function useAuth() {
   const [loading, setLoading] = useState(isSupabaseConfigured)
@@ -14,12 +14,29 @@ export function useAuth() {
       return null
     }
     try {
-      const row = await fetchProfile(user.id)
+      // Ensure role/email stay in sync without wiping admin.
+      const row = await upsertProfileAfterAuth(user, {
+        email: user.email,
+        fullName: user.user_metadata?.full_name || '',
+      })
       setProfile(row)
       return row
     } catch {
-      setProfile(null)
-      return null
+      try {
+        const row = await fetchProfile(user.id)
+        setProfile(row)
+        return row
+      } catch {
+        const email = String(user.email || '').trim()
+        const fallback = {
+          id: user.id,
+          email,
+          fullName: String(user.user_metadata?.full_name || '').trim(),
+          role: resolveProfileRoleForEmail(email),
+        }
+        setProfile(fallback)
+        return fallback
+      }
     }
   }, [])
 
@@ -115,7 +132,9 @@ export function useAuth() {
     profile,
     user: session?.user ?? null,
     isAuthenticated: Boolean(session?.user),
-    isAdmin: profile?.role === 'admin',
+    isAdmin:
+      profile?.role === 'admin' ||
+      isAdminEmail(profile?.email || session?.user?.email || ''),
     email: profile?.email || session?.user?.email || '',
     refreshAuth,
     completeAuth,
