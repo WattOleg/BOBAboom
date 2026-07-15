@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { verifyPayrollPin } from '../api/sheets'
-import PayrollPinModal from './PayrollPinModal'
 import { exportScheduleToPdf } from '../utils/pdfExport'
 import {
   addDaysYmd,
@@ -39,21 +37,6 @@ function newEmployeeId() {
 /** Суммы в тенге без копеек (для отображения) */
 function tenge(n) {
   return Math.round(Number(n) || 0)
-}
-
-const PAYROLL_SESSION_KEY = 'tk_payroll_unlocked_v1'
-
-function clearPayrollSession(monthKey) {
-  try {
-    const raw = sessionStorage.getItem(PAYROLL_SESSION_KEY)
-    if (!raw) return
-    const all = JSON.parse(raw)
-    if (!all || typeof all !== 'object') return
-    delete all[monthKey]
-    sessionStorage.setItem(PAYROLL_SESSION_KEY, JSON.stringify(all))
-  } catch {
-    // ignore storage errors
-  }
 }
 
 function softTint(hex, alpha = 0.2) {
@@ -124,10 +107,7 @@ function ScheduleView({
   const [scheduleTab, setScheduleTab] = useState('calendar')
   const [calendarEmployeeFilter, setCalendarEmployeeFilter] = useState('')
   const [payrollEmployeeFilter, setPayrollEmployeeFilter] = useState('')
-  const [payrollUnlocked, setPayrollUnlocked] = useState({})
-  const [payrollPinModal, setPayrollPinModal] = useState({ open: false, employeeId: '', employeeName: '' })
   const normalizedViewerEmail = String(viewerEmail || '').trim().toLowerCase()
-  const [payrollPinVerifying, setPayrollPinVerifying] = useState(false)
   const [dayModal, setDayModal] = useState(null)
   const [dayModalError, setDayModalError] = useState('')
   const [pdfBusy, setPdfBusy] = useState(false)
@@ -159,22 +139,6 @@ function ScheduleView({
   const dates = useMemo(() => monthDateStrings(year, month), [year, month])
   const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`
 
-  const resetPayrollAccess = useCallback(() => {
-    setPayrollUnlocked({})
-    setPayrollEmployeeFilter('')
-    setPayrollPinModal({ open: false, employeeId: '', employeeName: '' })
-    clearPayrollSession(monthKey)
-  }, [monthKey])
-
-  useEffect(() => {
-    resetPayrollAccess()
-  }, [monthKey, resetPayrollAccess])
-
-  useEffect(() => {
-    if (scheduleTab !== 'payroll') {
-      resetPayrollAccess()
-    }
-  }, [scheduleTab, resetPayrollAccess])
   const monthEmployees = useMemo(() => {
     const byMonth = data.employeesByMonth || {}
     const list = byMonth[monthKey]
@@ -182,15 +146,26 @@ function ScheduleView({
     return []
   }, [data.employeesByMonth, monthKey])
 
-  useEffect(() => {
-    if (canEdit || !normalizedViewerEmail) return
-    const matched = monthEmployees.find(
-      (employee) => String(employee.email || '').trim().toLowerCase() === normalizedViewerEmail,
+  const linkedEmployee = useMemo(() => {
+    if (!normalizedViewerEmail) return null
+    return (
+      monthEmployees.find(
+        (employee) => String(employee.email || '').trim().toLowerCase() === normalizedViewerEmail,
+      ) || null
     )
-    if (matched?.id) {
-      setCalendarEmployeeFilter(matched.id)
-    }
-  }, [canEdit, monthEmployees, normalizedViewerEmail])
+  }, [monthEmployees, normalizedViewerEmail])
+
+  useEffect(() => {
+    if (canEdit || !linkedEmployee?.id) return
+    setCalendarEmployeeFilter(linkedEmployee.id)
+    setPayrollEmployeeFilter(linkedEmployee.id)
+  }, [canEdit, linkedEmployee])
+
+  const payrollVisibleEmployees = useMemo(() => {
+    if (canEdit) return monthEmployees || []
+    if (!linkedEmployee) return []
+    return [linkedEmployee]
+  }, [canEdit, linkedEmployee, monthEmployees])
 
   const shiftsByDate = useMemo(() => {
     const map = new Map()
@@ -292,69 +267,30 @@ function ScheduleView({
     [employeePayouts],
   )
 
-  const openPayrollPinModal = useCallback(
-    (employeeId) => {
-      if (canEdit || !employeeId) return
-      if (payrollUnlocked[employeeId]) return
-      const emp = (monthEmployees || []).find((e) => e.id === employeeId)
-      setPayrollPinModal({
-        open: true,
-        employeeId,
-        employeeName: emp?.name || 'Сотрудник',
-      })
-    },
-    [canEdit, monthEmployees, payrollUnlocked],
-  )
-
-  const closePayrollPinModal = () => {
-    setPayrollPinModal({ open: false, employeeId: '', employeeName: '' })
-  }
-
-  const handlePayrollPinVerify = async (pin) => {
-    const { employeeId } = payrollPinModal
-    if (!employeeId) return false
-    setPayrollPinVerifying(true)
-    try {
-      const res = await verifyPayrollPin({ employeeId, pin, monthKey })
-      if (!res?.success || !res.payout) return false
-      setPayrollUnlocked((prev) => ({ ...prev, [employeeId]: res.payout }))
-      closePayrollPinModal()
-      return true
-    } finally {
-      setPayrollPinVerifying(false)
-    }
-  }
-
   const handlePayrollFilterChange = (employeeId) => {
+    if (!canEdit) return
     setPayrollEmployeeFilter(employeeId)
-    if (employeeId && !canEdit && !payrollUnlocked[employeeId]) {
-      openPayrollPinModal(employeeId)
-    }
   }
 
   const switchScheduleTab = (tab) => {
-    if (tab !== 'payroll' && scheduleTab === 'payroll') {
-      resetPayrollAccess()
-    }
     setScheduleTab(tab)
   }
 
   const getPayrollDisplayRow = (employeeId) => {
     const hours = (totals[employeeId] || { hours: 0 }).hours
+    const payout = payoutById.get(employeeId) || { hours: 0, gross: 0, net: 0 }
+    const emp = (monthEmployees || []).find((employee) => employee.id === employeeId)
+    const sampleDate = dates?.[0] || `${monthKey}-01`
+    const hourlyRate = emp ? rateForDate(sampleDate, emp) : 0
+
     if (canEdit) {
-      const row = payoutById.get(employeeId) || { hours: 0, gross: 0, net: 0 }
-      return { ...row, hours, hourlyRate: null, locked: false }
+      return { ...payout, hours, hourlyRate: null, locked: false }
     }
-    const unlocked = payrollUnlocked[employeeId]
-    if (unlocked) {
-      return {
-        hours: unlocked.hours ?? hours,
-        gross: unlocked.gross,
-        net: unlocked.net,
-        hourlyRate: unlocked.hourlyRate,
-        locked: false,
-      }
+
+    if (linkedEmployee?.id === employeeId) {
+      return { ...payout, hours, hourlyRate, locked: false }
     }
+
     return { hours, gross: null, net: null, hourlyRate: null, locked: true }
   }
 
@@ -880,22 +816,6 @@ function ScheduleView({
                 </label>
                 ) : null}
                 {canEdit ? (
-                  <label className="schedule-rate schedule-payroll-pin">
-                    PIN выплат
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      maxLength={4}
-                      value={e.payrollPin ?? ''}
-                      onChange={(ev) =>
-                        updateEmployee(e.id, { payrollPin: ev.target.value.replace(/\D/g, '').slice(0, 4) })
-                      }
-                      placeholder={e.hasPayrollPin ? '••••' : '4 цифры'}
-                    />
-                  </label>
-                ) : null}
-                {canEdit ? (
                   <div className="schedule-rates">
                     <div className="schedule-rates-head">
                       <strong>Ставки по датам</strong>
@@ -1126,20 +1046,25 @@ function ScheduleView({
         <h4>Итого за месяц</h4>
         {!canEdit ? (
           <p className="muted small schedule-payroll-hint">
-            Выберите сотрудника и введите PIN, чтобы увидеть ставку и суммы к выплате.
+            {linkedEmployee
+              ? `Ваши выплаты · ${linkedEmployee.name}`
+              : 'Чтобы видеть выплаты, попросите админа указать ваш email в карточке сотрудника.'}
           </p>
         ) : null}
-        <label className="schedule-modal-field schedule-payroll-filter">
-          Фильтр по сотруднику
-          <select value={payrollEmployeeFilter} onChange={(e) => handlePayrollFilterChange(e.target.value)}>
-            <option value="">Все</option>
-            {(monthEmployees || []).map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {canEdit ? (
+          <label className="schedule-modal-field schedule-payroll-filter">
+            Фильтр по сотруднику
+            <select value={payrollEmployeeFilter} onChange={(e) => handlePayrollFilterChange(e.target.value)}>
+              <option value="">Все</option>
+              {(monthEmployees || []).map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                  {e.email ? ` · ${e.email}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <div className="schedule-totals-grid">
           <div className="schedule-total-row schedule-totals-head" aria-hidden>
             <span className="schedule-total-dot schedule-total-dot-spacer" />
@@ -1148,28 +1073,12 @@ function ScheduleView({
             <span className="muted schedule-total-col-num">Начислено</span>
             <span className="muted schedule-total-col-num">К выплате</span>
           </div>
-          {(monthEmployees || [])
-            .filter((e) => !payrollEmployeeFilter || e.id === payrollEmployeeFilter)
+          {payrollVisibleEmployees
+            .filter((e) => !canEdit || !payrollEmployeeFilter || e.id === payrollEmployeeFilter)
             .map((e) => {
               const row = getPayrollDisplayRow(e.id)
               return (
-                <div
-                  key={e.id}
-                  className={`schedule-total-row ${row.locked ? 'is-payroll-locked' : ''}`}
-                  onClick={row.locked ? () => openPayrollPinModal(e.id) : undefined}
-                  onKeyDown={
-                    row.locked
-                      ? (ev) => {
-                          if (ev.key === 'Enter' || ev.key === ' ') {
-                            ev.preventDefault()
-                            openPayrollPinModal(e.id)
-                          }
-                        }
-                      : undefined
-                  }
-                  role={row.locked ? 'button' : undefined}
-                  tabIndex={row.locked ? 0 : undefined}
-                >
+                <div key={e.id} className="schedule-total-row">
                   <span className="schedule-total-dot" style={{ background: e.color }} />
                   <span className="schedule-total-name">
                     <span className="schedule-total-name-text">{e.name}</span>
@@ -1178,28 +1087,15 @@ function ScheduleView({
                     ) : null}
                   </span>
                   <strong className="schedule-total-col-num">{row.hours} ч</strong>
-                  <strong className="schedule-total-col-num">
-                    {row.locked ? (
-                      <span className="schedule-payroll-mask" title="Введите PIN">
-                        ••••
-                      </span>
-                    ) : (
-                      `${tenge(row.gross)} ₸`
-                    )}
-                  </strong>
-                  <strong className="schedule-total-col-num schedule-total-net">
-                    {row.locked ? (
-                      <span className="schedule-payroll-mask" title="Введите PIN">
-                        ••••
-                      </span>
-                    ) : (
-                      `${tenge(row.net)} ₸`
-                    )}
-                  </strong>
+                  <strong className="schedule-total-col-num">{`${tenge(row.gross)} ₸`}</strong>
+                  <strong className="schedule-total-col-num schedule-total-net">{`${tenge(row.net)} ₸`}</strong>
                 </div>
               )
             })}
         </div>
+        {!canEdit && !linkedEmployee ? (
+          <p className="muted small">Войдите под рабочей почтой или попросите админа привязать email.</p>
+        ) : null}
         {canEdit ? (
           <>
         <div className="schedule-grand">
@@ -1260,15 +1156,6 @@ function ScheduleView({
         ) : null}
       </div>
       ) : null}
-
-      <PayrollPinModal
-        isOpen={payrollPinModal.open}
-        title="PIN выплат"
-        subtitle={payrollPinModal.employeeName ? `Сотрудник: ${payrollPinModal.employeeName}` : ''}
-        onVerify={handlePayrollPinVerify}
-        onClose={closePayrollPinModal}
-        verifying={payrollPinVerifying}
-      />
 
       {patternOpen ? (
         <div className="export-modal-backdrop" onClick={() => setPatternOpen(false)}>
