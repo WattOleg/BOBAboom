@@ -144,7 +144,29 @@ button,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+}
+
+.list-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.list-header-titles {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.list-header-titles h1 {
+  font-size: 26px;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .list-header-badges {
@@ -152,7 +174,7 @@ button,
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  flex-shrink: 0;
+  flex: 0 0 auto;
 }
 
 .title-menu-wrap {
@@ -1005,28 +1027,110 @@ h1 {
 .auth-form {
   display: grid;
   gap: 10px;
-  margin-top: 14px;
+  margin-top: 18px;
+  width: 100%;
 }
 
 .auth-input {
   width: 100%;
-  min-height: 46px;
-  border: 1px solid #dbe4f0;
+  min-height: 48px;
+  border: 1.5px solid #c9d7ea;
   border-radius: 12px;
-  background: #f8fbff;
-  padding: 0 12px;
+  background: #fff;
+  color: #0f1b33;
+  padding: 0 14px;
+  text-align: left;
+}
+
+.auth-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(11, 99, 214, 0.16);
+}
+
+.auth-input::placeholder {
+  color: #7b8ba8;
 }
 
 .auth-submit {
   width: 100%;
+  min-height: 48px;
+  margin-top: 4px;
+  font-weight: 700;
 }
 
-.auth-hint {
-  margin: 8px 0 0;
-}
-
-.auth-error {
+.auth-error,
+.auth-success {
   margin: 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.auth-success {
+  color: #0b63d6;
+  font-weight: 600;
+}
+
+.auth-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background:
+    radial-gradient(circle at top, rgba(11, 99, 214, 0.22), transparent 42%),
+    linear-gradient(180deg, #0a1a36 0%, #0f2a55 48%, #163f7a 100%);
+}
+
+.auth-screen-overlay {
+  background: rgba(8, 18, 36, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.auth-card {
+  width: min(380px, 100%);
+  background: #ffffff;
+  color: #0f1b33;
+  border-radius: 22px;
+  padding: 28px 22px 22px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  text-align: center;
+}
+
+.auth-brand {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.auth-title {
+  margin-top: 10px;
+  font-size: 28px;
+  line-height: 1.15;
+  color: #0f1b33;
+}
+
+.auth-links {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 16px;
+}
+
+.auth-link {
+  border: none;
+  background: transparent;
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 700;
+  padding: 4px 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .pin-pad {
@@ -1197,40 +1301,40 @@ h1 {
   flex: 0 0 auto;
 }
 
-.account-login-btn,
-.account-chip {
+.account-login-btn {
   border: 1px solid #dbe4f0;
   background: #fff;
   color: var(--text);
   border-radius: 999px;
-  min-height: 42px;
-  padding: 4px 10px 4px 4px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 160px;
-}
-
-.account-login-btn {
+  min-height: 44px;
   padding: 0 14px;
-  font-weight: 600;
+  font-weight: 700;
   font-size: 13px;
 }
 
-.account-chip.is-open {
-  box-shadow: 0 0 0 2px rgba(11, 99, 214, 0.18);
+.account-chip {
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+}
+
+.account-chip.is-open .account-avatar {
+  box-shadow: 0 0 0 3px rgba(11, 99, 214, 0.28);
 }
 
 .account-avatar {
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
   display: grid;
   place-items: center;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
   color: #fff;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
   letter-spacing: 0.02em;
   flex: 0 0 auto;
 }
@@ -1241,32 +1345,10 @@ h1 {
   font-size: 15px;
 }
 
-.account-chip-text {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-  text-align: left;
-}
-
-.account-chip-name {
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.15;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-chip-role {
-  font-size: 10px;
-  color: var(--text3);
-  line-height: 1.1;
-}
-
 .account-panel {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   width: min(280px, calc(100vw - 32px));
   background: #fff;
   border-radius: 18px;
@@ -1276,6 +1358,7 @@ h1 {
   z-index: 20;
   display: grid;
   gap: 14px;
+  text-align: left;
 }
 
 .account-panel-head {
@@ -1308,7 +1391,7 @@ h1 {
   border-radius: 999px;
   padding: 4px 8px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   background: var(--surface2);
   color: var(--text2);
 }

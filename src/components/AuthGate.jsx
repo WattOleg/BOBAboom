@@ -33,31 +33,31 @@ function translateAuthError(err, context = 'signIn') {
   const name = String(err?.name || '').toLowerCase()
 
   if (name.includes('authretryablefetcherror') || status === 500) {
-    return 'Ошибка сервера Auth (500). В Supabase SQL Editor выполните supabase/fix-auth-trigger.sql. Также проверьте: проект не на паузе, Confirm email = OFF, VITE_SUPABASE_URL и ANON_KEY на Vercel верные.'
+    return 'Ошибка сервера. Попробуйте позже.'
   }
   if (message.includes('email not confirmed') || message.includes('email_not_confirmed')) {
-    return 'Email не подтверждён. В Supabase: Authentication → Providers → Email → Confirm email = OFF. Затем Users → Confirm user.'
+    return 'Email не подтверждён.'
   }
   if (message.includes('invalid login credentials') || message.includes('invalid_credentials')) {
     if (context === 'afterExistingSignUp') {
-      return 'Аккаунт уже есть, но пароль другой. Нажмите «Забыли пароль?» или в Supabase → Authentication → Users удалите пользователя и зарегистрируйтесь заново.'
+      return 'Аккаунт уже есть. Войдите или сбросьте пароль.'
     }
-    return 'Неверный email или пароль. Если регистрировались повторно — пароль остался от первой регистрации. Используйте «Забыли пароль?».'
+    return 'Неверный email или пароль.'
   }
   if (message.includes('user already registered') || message.includes('already been registered')) {
-    return 'Этот email уже зарегистрирован. Войдите или сбросьте пароль.'
+    return 'Email уже зарегистрирован.'
   }
   if (message.includes('redirect') || message.includes('redirect_to')) {
-    return 'Redirect URL не разрешён. В Supabase → Authentication → URL Configuration добавьте https://bob-aboom.vercel.app/**'
+    return 'Ошибка redirect URL.'
   }
   if (message.includes('password') && (message.includes('least') || message.includes('6'))) {
-    return 'Пароль должен быть не менее 6 символов'
+    return 'Пароль — минимум 6 символов.'
   }
   if (message.includes('rate limit') || status === 429) {
-    return 'Слишком много попыток. Подождите минуту.'
+    return 'Слишком много попыток.'
   }
   if (message && message !== '{}') return readErrorText(err)
-  return 'Не удалось выполнить операцию. Проверьте email/пароль или настройки Auth в Supabase.'
+  return 'Не удалось выполнить операцию.'
 }
 
 function hasAuthError(error) {
@@ -124,11 +124,7 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
           const redirectTo = `${origin}/?reset=1`
           const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, { redirectTo })
           if (hasAuthError(resetError)) throw resetError
-          setSuccess(
-            'Если аккаунт существует, письмо ушло на почту. Проверьте Spam. Если письма нет — в Supabase: Authentication → Users удалите пользователя или отправьте recovery. Redirect URL: ' +
-              origin +
-              '/**',
-          )
+          setSuccess('Письмо отправлено. Проверьте почту.')
         } catch (err) {
           setError(translateAuthError(err, 'reset'))
         } finally {
@@ -159,7 +155,7 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
           })
           if (hasAuthError(signInError)) throw signInError
           if (!(await finishWithSession(data?.session, normalizedName))) {
-            setSuccess('Вход выполнен. Если интерфейс не обновился, перезагрузите страницу.')
+            setSuccess('Готово.')
           }
           return
         }
@@ -202,7 +198,7 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
           return
         }
 
-        setSuccess('Аккаунт создан. Теперь войдите с тем же email и паролем.')
+        setSuccess('Аккаунт создан. Войдите.')
       } catch (err) {
         setError(translateAuthError(err, mode))
       } finally {
@@ -211,26 +207,19 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
     })()
   }
 
-  const heading =
-    mode === 'signIn' ? 'Вход в BB' : mode === 'signUp' ? 'Регистрация в BB' : 'Сброс пароля'
+  const heading = mode === 'signIn' ? 'Вход' : mode === 'signUp' ? 'Регистрация' : 'Сброс пароля'
 
   return (
-    <div className="pin-backdrop" onClick={allowClose ? onClose : undefined}>
-      <div className="pin-modal auth-modal" onClick={(event) => event.stopPropagation()}>
-        <h3>{title || heading}</h3>
-        <p className="muted auth-hint">
-          {mode === 'resetPassword'
-            ? 'Ссылка придёт на email. Если письма нет — проверьте Spam или задайте пароль в Supabase → Authentication → Users.'
-            : mode === 'signUp'
-              ? 'Создайте аккаунт один раз. Повторная регистрация пароль не меняет.'
-              : 'Вход по email и паролю. Первый раз — «Создать новый аккаунт».'}
-        </p>
+    <div className={`auth-screen ${allowClose ? 'auth-screen-overlay' : ''}`} onClick={allowClose ? onClose : undefined}>
+      <div className="auth-card" onClick={(event) => event.stopPropagation()}>
+        <div className="auth-brand">BOBA BOOM</div>
+        <h3 className="auth-title">{heading}</h3>
         <form onSubmit={submit} className="auth-form">
           {mode === 'signUp' ? (
             <input
               className="auth-input"
               type="text"
-              placeholder="Имя (необязательно)"
+              placeholder="Имя"
               value={fullName}
               onChange={(event) => setFullName(event.target.value)}
             />
@@ -249,7 +238,7 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
             <input
               className="auth-input"
               type="password"
-              placeholder="Пароль (мин. 6 символов)"
+              placeholder="Пароль"
               autoComplete={mode === 'signIn' ? 'current-password' : 'new-password'}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -257,56 +246,58 @@ function AuthGate({ isOpen, onClose, onSuccess, title = 'Вход в BB', allowC
           ) : null}
           <button type="submit" className="btn btn-dark auth-submit" disabled={submitting}>
             {submitting
-              ? 'Отправляем...'
+              ? '...'
               : mode === 'signIn'
                 ? 'Войти'
                 : mode === 'signUp'
-                  ? 'Зарегистрироваться'
-                  : 'Отправить ссылку'}
+                  ? 'Создать аккаунт'
+                  : 'Отправить'}
           </button>
           {error ? <p className="error auth-error">{String(error)}</p> : null}
-          {success ? <p className="muted auth-success">{success}</p> : null}
+          {success ? <p className="auth-success">{success}</p> : null}
         </form>
-        {mode === 'signIn' ? (
-          <button
-            type="button"
-            className="ghost-btn auth-toggle"
-            onClick={() => {
-              setMode('resetPassword')
-              setError('')
-              setSuccess('')
-            }}
-          >
-            Забыли пароль?
-          </button>
-        ) : null}
-        {mode !== 'resetPassword' ? (
-          <button
-            type="button"
-            className="ghost-btn auth-toggle"
-            onClick={() => {
-              setMode(mode === 'signIn' ? 'signUp' : 'signIn')
-              setError('')
-              setSuccess('')
-            }}
-          >
-            {mode === 'signIn' ? 'Создать новый аккаунт' : 'Уже есть аккаунт? Войти'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="ghost-btn auth-toggle"
-            onClick={() => {
-              setMode('signIn')
-              setError('')
-              setSuccess('')
-            }}
-          >
-            Назад ко входу
-          </button>
-        )}
+        <div className="auth-links">
+          {mode === 'signIn' ? (
+            <button
+              type="button"
+              className="auth-link"
+              onClick={() => {
+                setMode('resetPassword')
+                setError('')
+                setSuccess('')
+              }}
+            >
+              Забыли пароль?
+            </button>
+          ) : null}
+          {mode !== 'resetPassword' ? (
+            <button
+              type="button"
+              className="auth-link"
+              onClick={() => {
+                setMode(mode === 'signIn' ? 'signUp' : 'signIn')
+                setError('')
+                setSuccess('')
+              }}
+            >
+              {mode === 'signIn' ? 'Регистрация' : 'Войти'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="auth-link"
+              onClick={() => {
+                setMode('signIn')
+                setError('')
+                setSuccess('')
+              }}
+            >
+              Назад
+            </button>
+          )}
+        </div>
         {!isSupabaseConfigured ? (
-          <p className="error auth-error">Supabase не настроен. Проверьте VITE_SUPABASE_URL и VITE_SUPABASE_ANON_KEY.</p>
+          <p className="error auth-error">Supabase не настроен.</p>
         ) : null}
       </div>
     </div>

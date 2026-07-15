@@ -8,7 +8,7 @@ function getInitials(fullName, email) {
     return name.slice(0, 2).toUpperCase()
   }
   const mail = String(email || '').trim()
-  return mail ? mail.slice(0, 2).toUpperCase() : 'BB'
+  return mail ? mail.slice(0, 2).toUpperCase() : '?'
 }
 
 function AccountMenu({ auth }) {
@@ -35,14 +35,14 @@ function AccountMenu({ auth }) {
 
   if (!auth.isAuthenticated) {
     return (
-      <button type="button" className="account-login-btn" onClick={auth.onSignIn}>
+      <button type="button" className="account-login-btn" onClick={auth.onSignIn} aria-label="Войти">
         Войти
       </button>
     )
   }
 
   const displayName = String(auth.fullName || '').trim() || String(auth.email || '').split('@')[0] || 'Пользователь'
-  const roleLabel = auth.isAdmin ? 'Администратор' : 'Сотрудник'
+  const roleLabel = auth.isAdmin ? 'Админ' : 'Сотрудник'
   const initials = getInitials(auth.fullName, auth.email)
 
   return (
@@ -53,14 +53,11 @@ function AccountMenu({ auth }) {
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="Личный кабинет"
+        aria-label="Личный кабинет"
+        title={displayName}
       >
         <span className="account-avatar" aria-hidden>
           {initials}
-        </span>
-        <span className="account-chip-text">
-          <span className="account-chip-name">{displayName}</span>
-          <span className="account-chip-role">{roleLabel}</span>
         </span>
       </button>
 

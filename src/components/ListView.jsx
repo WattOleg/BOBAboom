@@ -180,19 +180,14 @@ function ListView({
     <div className="view list-view" ref={rootRef}>
       <div className="list-sticky-zone">
         <header className="list-header">
-          <div className="title-menu-wrap">
-            <div className="title-menu-btn">
-              <div className="title-logo title-logo-badge" aria-hidden>
-                BB
-              </div>
-              <div>
-                <div className="title-brand">BOBA BOOM</div>
-                <h1>{activeSectionLabel}</h1>
-              </div>
+          <div className="list-header-left">
+            <AccountMenu auth={auth} />
+            <div className="list-header-titles">
+              <div className="title-brand">BOBA BOOM</div>
+              <h1>{activeSectionLabel}</h1>
             </div>
           </div>
           <div className="list-header-badges">
-            <AccountMenu auth={auth} />
             {visitCount != null ? (
               <div
                 className="app-visit-counter"
@@ -218,7 +213,9 @@ function ListView({
                 <span>{visitCount.toLocaleString('ru-RU')}</span>
               </div>
             ) : null}
-            <span className="count-badge">{activeSection === 'techcards' ? filtered.length : '•'}</span>
+            {activeSection === 'techcards' ? (
+              <span className="count-badge">{filtered.length}</span>
+            ) : null}
           </div>
         </header>
 
